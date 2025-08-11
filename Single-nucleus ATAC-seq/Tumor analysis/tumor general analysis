@@ -1,0 +1,283 @@
+
+library(Signac)
+library(Seurat)
+library(SeuratWrappers)
+library(monocle3)
+library(Matrix)
+library(ggplot2)
+library(patchwork)
+library(magrittr)
+library(dplyr)
+library(tidyr) 
+library(Seurat)
+library(EnsDb.Hsapiens.v86)
+library(BuenColors)
+library(clusterProfiler)
+library(msigdbr)
+library(dplyr)
+library(enrichplot)
+library(DOSE)
+library(org.Hs.eg.db)
+library(forcats)
+library(dittoSeq)
+library(aPEAR)
+library(msigdbr)
+
+endocrine1 <- readRDS("/endocrine1.rds")
+
+alphabet <- c( "#FF9900", "#7D9BE5", "#DAB2B2", "#66529F", "#87C55F", "#289E92", "#EB545C", "#5084C2",
+               "#F5D78F", "#0099FF", "#85C17E", "#FC6FCF", "#2B6688", "#245297", "#D87070", "#AABBCC",
+               "#C24976", "#DEBF80", "#5F9069", "#A37E7D", "#B291B5", "#8A7197", "#3BA997",
+               "#73AD96", "#95BAA6", "#B487B7", "#F0CE58", "#EF7512", "#76A2BB", "#F52831", "#F1A93B",
+               "#7F7F7F", "#CB7E83", "#469393", "#F5C96B", "#DCCD58", "#EB8E7C"
+)
+
+
+p1 <- DimPlot(object = endocrine1, label = TRUE) +  
+  scale_color_manual(values = alphabet[1:(endocrine1@active.ident %>% unique %>% length )])
+ggsave("UMAP_Tumor.pdf", plot = p1, dpi = 600, bg = NULL, height = 8, width = 8)
+
+p2 <- DimPlot(endocrine1, reduction = "umap", group.by = "grade")
+ggsave("UMAP_Tumor_grade.pdf", plot = p2, dpi = 600, bg = NULL, height = 8, width = 8)
+
+p3 <- DimPlot(endocrine1, reduction = "umap", group.by = "dataset")
+ggsave("UMAP_Tumor_dataset.pdf", plot = p3, dpi = 600, bg = NULL, height = 8, width = 8)
+
+#markergene dot plot, cell counts in each celltype
+#endocrine使用的markergene
+DefaultAssay(endocrine1) <- 'RNA'
+
+marker.genes <- unique(c(
+  "ASCL1", "ELF3", "TOX2", "INSM1", 
+  "ZMAT4","EBF3", "ISL1",  "EBF1", 
+  "NEUROD1", "HNF4A", "FOXA3", "FOXA2", "RFX6", 
+  "ST18", "HNF4G", "XBP1", "HNF1A", "POU2F3","GFI1B", 
+  "EHF", "LEF1", "ZNF385B", 
+  "TCF7", "YAP1", "SMARCA4","PTEN","TP53","TRIM24","TRIM28","TRIM33","PCSK1", #tumor suppressor or decreased in tumor
+  "ARX","ISL1","PDX1","CDX2",# increased in tumor
+  "E2F1","E2F2","E2F3","EZH2","SP3","DHFR","BAX","TOP2A","BCL2","TOP2A"
+))
+
+p4 <- DotPlot(endocrine1, features=marker.genes, cols="RdGy") + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) 
+ggsave("Dotplot_Tumor.pdf", plot = p4, dpi = 600, bg = NULL, height = 6, width = 10)
+
+# Msigdb pathway enrich analysis
+DefaultAssay(endocrine1) <- 'RNA'
+
+######1.find DEGs and transfer to standard format
+diff <- FindAllMarkers(endocrine1, assay = "RNA", logfc.threshold = 0.4, min.pct = 0.01)  #only.pos = T
+
+#cluster information
+group <- data.frame(gene=diff$gene,
+                    group=diff$cluster)#分组情况
+
+
+Gene_ID <- bitr(diff$gene, fromType="SYMBOL", 
+                toType="ENTREZID", 
+                OrgDb="org.Hs.eg.db")
+
+
+data  <- merge(Gene_ID,group,by.x='SYMBOL',by.y='gene')
+
+#---------------------step 2 msigdb hallmark pathway-----------------------------
+
+######1.prepare msigdb hallmark pathway set
+msig_hallmark <- msigdbr(species = "Homo sapiens", category = "H")
+
+######3.pathway enrich analysis
+pathway_enrich <- compareCluster(
+  ENTREZID~group, 
+  data=data, 
+  fun="enricher", 
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  qvalueCutoff = 0.05,
+  TERM2GENE = msig_hallmark_list, 
+  TERM2NAME = NA
+)
+
+p5 <- dotplot(pathway_enrich, showCategory=30,font.size = 8)+
+  theme(
+    panel.grid.major = element_blank(),  
+    panel.grid.minor = element_blank(),  
+    panel.background = element_blank()   #
+  )
+p5
+#save plot
+ggsave("Msigdb_pathway_tumor.pdf", plot = p5, width = 8, height =10) #change name
+
+
+#####################Peak analysis ################################################
+#####################Peak analysis ################################################
+library(Seurat)
+library(EnhancedVolcano)
+library(ggplot2)
+library(ggrepel)
+library(dplyr)
+
+DefaultAssay(endocrine1) <- 'peaks'
+
+da_peaks <- FindAllMarkers(endocrine1, assay = "peaks", logfc.threshold = 0.5, min.pct = 0.01)  #only.pos = T
+da_peaks$closest_gene <- ClosestFeature(endocrine1, regions = rownames(da_peaks))$gene_name
+
+#find closest genes near da_peaks
+open_da_peaks <- rownames(da_peaks)
+open_da_peaks
+closest_genes_da_peaks <- ClosestFeature(endocrine1, regions=open_da_peaks)
+head(closest_genes_da_peaks)
+
+closest_genes_da_peaks1 <- DACRs_marker
+
+#merge da_peaks and closest_gene
+da_peaks_name <- merge(closest_genes_da_peaks, da_peaks, by.x = "query_region", by.y = "gene", all.x = TRUE)
+
+
+da_peaks_filtered <-da_peaks_name[da_peaks_name$p_val_adj < 0.0001, ]
+#da_peaks_filtered <- da_peaks_name %>% group_by(cluster) %>% top_n(n = 30, wt = avg_log2FC)
+
+#da_peaks_filtered=da_peaks_name
+gene_cell_exp <- AverageExpression(endocrine1,
+                                   features = da_peaks_filtered$query_region,
+                                   group.by = 'celltype',
+                                   layer = 'data',
+                                   assays = 'peaks') 
+
+mat =gene_cell_exp
+
+#label gene
+top6 = da_peaks_name %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
+top6$name <- paste(top6$query_region, top6$gene_name, sep = "-")
+
+#plot
+pdf('heatmap_diff_Peak.pdf', width=8, height=16)
+heata = heatmap(mat ,
+                    data_scale = F,
+                    Order_col = colnames(mat),
+                    legendTitle = "z-score",
+                    point_size = 5,
+                    heat_col = c('#4575b4','#abd9e9','white','#f46d43','#d73027'),
+                    #heat_col = brewer.pal(n = 5, name = "RdYlBu"),
+                    TitlePosition = "leftcenter-rot",
+                    legend_at = c(-8,-4,0,4,8),
+                    legend_Lab = c(-8,-4,0,4,8),
+                    column_names_gp = gpar(fontsize = 6),
+                    row_names_gp = gpar(fontsize = 6),
+                    customRowLabel=top6$name,
+                    colanno_color = c("#CB7E83","#73A1BE","#85C17E","#F5C96B","#7D9BE5","#EB8E7C","#F5C96B","#87C55F","#289E92"))
+
+draw(heata, merge_legends = TRUE,heatmap_legend_side = "right") 
+dev.off()
+
+
+#####################motif analysis ################################################
+#####################motif analysis ################################################
+##########motif analysis#################################
+#######################Motif enrichment####################
+library(Signac)
+library(Seurat)
+library(JASPAR2020)
+library(TFBSTools)
+library(BSgenome.Hsapiens.UCSC.hg38)
+library(patchwork)
+library(BiocParallel)
+register(MulticoreParam(15))
+
+library(ggplot2)
+
+
+########################################################################################################################
+#Part2
+DefaultAssay(endocrine1) <- "chromvar"
+###3 Different TF in celltype
+differential.activity <- FindAllMarkers(
+  object = endocrine1,
+  #ident.1 = 'Pvalb',
+  #ident.2 = 'Sst',
+  only.pos = TRUE,
+  mean.fxn = rowMeans,
+  fc.name = "avg_diff"
+)
+
+differential.activity
+
+differential.activity <- merge(differential.activity, list_motif, by.x = "gene", by.y = "ID", all.x = TRUE)
+
+differential.activity
+
+write.csv(differential.activity, "diff_TF_tumor.csv")
+
+#############
+
+gene_cell_exp <- AverageExpression(endocrine1,
+                                   features = differential.activity$gene,
+                                   group.by = 'celltype',
+                                   layer = 'data',
+                                   assays = 'chromvar') 
+
+mat =gene_cell_exp1
+
+#label gene
+top6 = differential.activity %>% group_by(cluster) %>% top_n(n = 6, wt = avg_diff)
+
+genes <- c(
+  "ASCL1", "NKX2-1", "NEUROG3", "ELF3", "GFI1", "SOX2", "TOX2", "INSM1", 
+  "ZMAT4", "MYT1L", "EBF3", "ISL1", "SOX1", "ZNF711", "FOXN4", "EBF1", 
+  "POU4F1", "LHX2", "NEUROD1", "HNF4A", "FOXA3", "FOXA2", "RFX6", "ETS2", 
+  "HOXB5", "ST18", "HNF4G", "XBP1", "HNF1A", "POU2F3", "SOX9", "GFI1B", 
+  "HOXC10", "EHF", "FOXI1", "TBX1", "TFAP2B", "HOXC11", "HOXC9", "MSX2", 
+  "SP5", "FOXF2", "SOX14", "PRDM1", "ZNF595", "LEF1", "LHX1", "ZNF385B", 
+  "TCF7", "YAP1", "SMARCA4","PTEN","TP53","TRIM24","TRIM28","TRIM33","PCSK1", #tumor suppressor or decreased in tumor
+  "ARX","ISL1","PDX1","CDX2",# increased in tumor
+  "E2F1","E2F2","E2F3","EZH2","SP3","DHFR","BAX","TOP2A","BCL2","TOP2A"
+)
+
+column_order <- c("Tumor-1", "Tumor-2", "Tumor-3", "Tumor-4", "Tumor-5", "Tumor-6", "Tumor-7", "Tumor-8", "Tumor-9")
+mat <- mat[, column_order]
+
+
+#plot
+pdf('heatmap1_TF activity_tumor_20250114.pdf', width=4, height=6)
+heata = Heatmap(mat ,
+                    data_scale = F,
+                    Order_col = colnames(mat),
+                    legendTitle = "z-score",
+                    point_size = 5,
+                    heat_col = c('#006837','#a6d96a','white','#fdae61','#d73027'),
+                    #heat_col = brewer.pal(n = 5, name = "RdYlBu"),
+                    TitlePosition = "leftcenter-rot",
+                    legend_at = c(-4,-2,0,2,4),
+                    legend_Lab = c(-4,-2,0,2,4),
+                    column_names_gp = gpar(fontsize = 6),
+                    row_names_gp = gpar(fontsize = 6),
+                    #customRowLabel=top6$name, #annotation
+                    customRowLabel=genes, #annotation
+                    colanno_color = c("#66529F","#FF9900","#5084C2","#EB545C","#7D9BE5","#EB8E7C","#F5C96B","#87C55F","#289E92"))
+
+
+draw(heata, merge_legends = TRUE,heatmap_legend_side = "right") 
+dev.off()
+
+
+############Motif enrich in  each cell type plot:line############
+############Motif enrich in  each cell type plot:line############
+differential.activity_filtered=differential.activity
+# 计算 -log10(p_val)
+differential.activity_filtered$`-log10(p_val_adj)` <- -log10(differential.activity_filtered$p_val_adj)
+
+# 
+print(differential.activity_filtered)
+
+ggplot(df, aes(rank, mlog10Padj, color = mlog10Padj)) + 
+  geom_point(size = 1) +  #
+  ggrepel::geom_label_repel(
+    data = df[rev(seq_len(min(nrow(df), 30))), ], aes(x = rank, y = mlog10Padj, label = TF), 
+    size = 1.5,
+    nudge_x = 2,
+    color = "black"           
+  ) + 
+  theme_classic() + 
+  ylab("-log10(P-adj) Motif Enrichment") +
+  xlab("Rank Sorted TFs Enriched") +
+  scale_color_gradientn(colors = c("#fff5f0", "#ea8171", "#b13f64"))
+
+

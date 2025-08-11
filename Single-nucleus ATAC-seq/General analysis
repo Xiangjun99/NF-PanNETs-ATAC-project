@@ -1,0 +1,454 @@
+rm(list=ls())
+
+library(Signac)
+library(Seurat)
+library(EnsDb.Hsapiens.v86)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+library(magrittr)
+library(dplyr)
+library(tidyr)
+
+
+options(future.globals.maxSize = 50000000 * 1024^2) # for 50 Gb RAM
+
+counts <- Read10X_h5(filename = "filtered_peak_bc_matrix.h5")
+
+chrom_assay <- CreateChromatinAssay(
+  counts = counts,
+  sep = c(":", "-"),
+  fragments = './fragments.tsv.gz',
+  min.cells = 1,
+  min.features = 1
+)
+
+pbmc <- CreateSeuratObject(
+  counts = chrom_assay,
+  assay = "peaks",
+  meta.data = metadata
+)
+
+pbmc
+pbmc[['peaks']]
+granges(pbmc)
+
+
+
+#remove the features that correspond to chromosome scaffolds e.g. (KI270713.1) or 
+#other sequences instead of the (22+2) standard chromosomes
+peaks.keep <- seqnames(granges(pbmc)) %in% standardChromosomes(granges(pbmc))
+pbmc <- pbmc[as.vector(peaks.keep), ]
+
+library(AnnotationHub)
+ah <- AnnotationHub()
+
+# Search for the Ensembl 98 EnsDb for Homo sapiens on AnnotationHub
+query(ah, "EnsDb.Hsapiens.v86")
+
+ensdb_v86 <- EnsDb.Hsapiens.v86
+
+# extract gene annotations from EnsDb
+annotations <- GetGRangesFromEnsDb(ensdb = ensdb_v86)
+
+# change to UCSC style since the data was mapped to hg38
+seqlevels(annotations) <- paste0('chr', seqlevels(annotations))
+genome(annotations) <- "hg38"
+
+# add the gene information to the object
+Annotation(pbmc) <- annotations
+
+# compute nucleosome signal score per cell
+pbmc <- NucleosomeSignal(object = pbmc)
+
+# compute TSS enrichment score per cell
+pbmc <- TSSEnrichment(object = pbmc, fast = TRUE) 
+
+# add blacklist ratio and fraction of reads in peaks
+pbmc$pct_reads_in_peaks <- pbmc$peak_region_fragments / pbmc$passed_filters * 100
+pbmc$blacklist_ratio <- FractionCountsInRegion(
+  object = pbmc, 
+  assay = 'peaks',
+  regions = blacklist_hg38_unified
+)
+
+#save
+pdf("DensityScatterPlot.pdf", width = 8, height = 6)
+DensityScatter(pbmc, x = 'nCount_peaks', y = 'TSS.enrichment', log_x = TRUE, quantiles = TRUE)
+dev.off()
+
+pdf("QC_Vln_Plot_TSS.pdf", width = 12, height = 6)
+VlnPlot(
+  object = pbmc,
+  group.by = "dataset",
+  features = c('nCount_peaks', 'TSS.enrichment','nucleosome_signal', 'pct_reads_in_peaks','blacklist_ratio'),
+  pt.size = 0.1,
+  ncol = 5
+)
+dev.off()
+
+#remove cells that are outliers for these QC metrics
+pbmc.filter <- subset(
+  x = pbmc,
+  subset = nCount_peaks > 0 &
+    nCount_peaks < 30000 &
+    pct_reads_in_peaks > 5 &
+    blacklist_ratio < 0.05 &
+    nucleosome_signal < 4 &
+    TSS.enrichment > 2
+)
+pbmc.filter
+table(pbmc.filter$dataset)
+
+##############recaclculate QC################
+# compute nucleosome signal score per cell
+pbmc.filter <- NucleosomeSignal(object = pbmc.filter)
+
+# compute TSS enrichment score per cell
+pbmc.filter <- TSSEnrichment(object = pbmc.filter, fast = TRUE) 
+
+# add blacklist ratio and fraction of reads in peaks
+pbmc.filter$pct_reads_in_peaks <- pbmc.filter$peak_region_fragments / pbmc$passed_filters * 100
+pbmc.filter$blacklist_ratio <- FractionCountsInRegion(
+  object = pbmc.filter, 
+  assay = 'peaks',
+  regions = blacklist_hg38_unified
+)
+
+##############recaclculate QC################
+
+library(RColorBrewer)
+#colors <- brewer.pal(n = 9, name = "Set3") # Set1, Set2, Set3 等不同配色方案
+
+# Set the desired order for the "dataset" column
+pbmc.filter$dataset <- factor(pbmc.filter$dataset, levels = c("N1325", "N584", "T912", "T873", "T676", "T753", "T1311", "T1325", "T584"))
+
+pdf("QC_Vln_Plot_filter.pdf", width = 12, height = 6)
+VlnPlot(
+  object = pbmc.filter,
+  group.by = "dataset",
+  features = c('nCount_peaks','TSS.enrichment','nucleosome_signal','blacklist_ratio','pct_reads_in_peaks'), 
+  pt.size = 0.1,
+  ncol = 5,
+  cols = c('#66529F', '#FF9900', '#5084C2','#EB545C', '#EB8E7C', '#7D9BE5','#F5C96B','#87C55F', '#289E92'),
+  alpha = 0.015
+)
+dev.off()
+
+#####################start analysis##########################################
+alphabet = c( '0'= '#245297','1'='#66529F', '2'='#FF9900', '3'='#5084C2','4'='#2B6688','5'= '#EB8E7C','6'= '#7D9BE5','7'='#F5C96B',
+              '8'='#87C55F', '9'='#289E92','10'= '#FC6FCF', '11'='#0099FF','12'= '#85C17E','13'= '#EB545C',
+              '14' = '#D87070','15' = '#AABBCC',  '16' = '#C24976', '17' = '#DEBF80',  '18' = '#5F9069',  '19' = '#A37E7D', 
+              '20' ='#B291B5','21' ='#8A7197','22' ='#3BA997','23' ='#7F7F7F','24' ='#73AD96','25' ='#F5D78F','26' ='#B487B7',
+              '27' ='#F0CE58','28' ='#EF7512','29' ='#76A2BB','30' ='#F52831','31' ='#F1A93B',
+              '32' ='#DCCD58','33' ='#DAB2B2','34' ='#CB7E83','35' ='#469393','36' ='#95BAA6')
+#####################start analysis##########################################
+#Normalization and linear dimensional reduction to remove batch effect
+pbmc.filter <- RunTFIDF(pbmc.filter)
+pbmc.filter <- FindTopFeatures(pbmc.filter, min.cutoff = 'q0')
+pbmc.filter <- RunSVD(pbmc.filter)
+
+DepthCor(pbmc.filter)
+
+DefaultAssay(pbmc) <- 'peaks'
+
+pbmc.filter <- RunUMAP(object = pbmc.filter, reduction = 'lsi', dims = 2:10)
+pbmc.filter <- FindNeighbors(object = pbmc.filter, reduction = 'lsi', dims = 2:10)
+pbmc.filter <- FindClusters(object = pbmc.filter, verbose = FALSE, algorithm = 3)
+
+plot1 <- DimPlot(object = pbmc.filter, label = TRUE) +
+  scale_color_manual(values = alphabet[1:(pbmc.filter@active.ident %>% unique %>% length )])
+plot1
+ggsave("UMAP_snATAC_noharmony.pdf", plot = plot1, dpi = 600, bg = NULL, height = 8, width = 8)
+
+plot2 <- DimPlot(object = pbmc.filter, label = TRUE, group.by = "dataset") 
+plot2
+ggsave("UMAP_snATAC_dataset_noharmony.pdf", plot = plot1, dpi = 600, bg = NULL, height = 8, width = 8)
+
+p <- plot1+plot2
+p
+ggsave("UMAP_snATAC_Cling_noharmony.pdf", plot = p, dpi = 600, bg = NULL, height = 8, width = 16)
+
+
+table(pbmc.filter$dataset)
+prop.table(table(Idents(pbmc.filter)))
+table(Idents(pbmc.filter), pbmc.filter$dataset)
+
+#save
+cell_table <- as.data.frame(table(Idents(pbmc.filter), pbmc.filter$dataset))
+write.csv(cell_table, file = "pbmc.filter_cell_counts_in_each_sample.csv", row.names = FALSE)
+
+
+Cellratio <- prop.table(table(Idents(pbmc.filter), pbmc.filter$dataset), margin = 2)
+Cellratio <- as.data.frame(Cellratio)
+
+allcolour=c('#66529F','#FF9900','#5084C2','#EB545C',"#DC143C","#0000FF","#20B2AA","#FFA500","#9370DB","#98FB98","#F08080","#1E90FF","#7CFC00","#FFFF00",
+            "#808000","#FF00FF","#FA8072","#7B68EE","#9400D3","#800080","#A0522D","#D2B48C","#D2691E","#87CEEB","#40E0D0","#5F9EA0",
+            "#FF1493","#0000CD","#008B8B","#FFE4B5","#8A2BE2","#228B22","#E9967A","#4682B4","#32CD32","#F0E68C","#FFFFE0","#EE82EE",
+            "#FF6347","#6A5ACD","#9932CC","#8B008B","#8B4513","#DEB887")
+
+library(ggplot2)
+
+p1 <- ggplot(Cellratio) + 
+  geom_bar(aes(x =Var2, y= Freq, fill = Var1),stat = "identity",width = 0.7,size = 0.5,colour = '#222222')+ 
+  theme_classic() +
+  labs(x='Sample',y = 'Ratio')+
+  scale_fill_manual(values = allcolour)+
+  theme(panel.border = element_rect(fill=NA,color="black", size=0.5, linetype="solid"))
+p1
+ggsave("pbmc.filter_cellratio_per_celltype_noharmony.pdf", plot = p1, dpi = 600, bg = NULL, height = 6, width = 8)
+
+######################################################################################################################
+#RNA analysis 
+# add the gene activity matrix to the Seurat object as a new assay and normalize it
+gene.activities <- GeneActivity(pbmc.filter)
+
+pbmc.filter[['RNA']] <- CreateAssayObject(counts = gene.activities)
+
+pbmc.filter <- NormalizeData(
+  object = pbmc.filter,
+  assay = 'RNA',
+  normalization.method = 'LogNormalize',
+  scale.factor = median(pbmc.filter$nCount_RNA)
+)
+saveRDS(pbmc.filter, file = "pbmc.filter.rds")
+
+######################################################################################################################
+######################################################################################################################
+#call peaks
+library(Signac)
+library(Seurat)
+
+pbmc.filter <- readRDS("pbmc.filter.rds")
+peaks <- readRDS("MACS2_callpeaks.rds")
+
+DefaultAssay(pbmc.filter) <- 'peaks'
+
+#CallPeaks by MACS2 
+peaks <- CallPeaks(
+  object = pbmc.filter,
+  group.by = "seurat_clusters"
+)
+
+#visualize the cell-type-specific MACS2 peak calls alongside the 10x Cellranger peak calls (currently being used in the pbmc object) with the CoveragePlot() function. 
+#Here the Cellranger peaks are shown in grey and the MACS2 peaks in red:
+CoveragePlot(
+  object = pbmc.filter,
+  region = "CD8A",
+  ranges = peaks,
+  ranges.title = "MACS2"
+)
+
+######################################################################################################################
+######################################################################################################################
+#motif analysis
+library(Signac)
+library(Seurat)
+library(JASPAR2020)
+library(TFBSTools)
+#library(BSgenome.Mmusculus.UCSC.mm10)
+library(BSgenome.Hsapiens.UCSC.hg38)
+library(patchwork)
+
+# Get a list of motif position frequency matrices from the JASPAR database
+pfm <- getMatrixSet(
+  x = JASPAR2020,
+  opts = list(collection = "CORE", tax_group = 'vertebrates', all_versions = FALSE)
+)
+
+# add motif information
+pbmc.filter <- AddMotifs(
+  object = pbmc.filter,
+  genome = BSgenome.Hsapiens.UCSC.hg38,
+  pfm = pfm
+)
+
+#register(MulticoreParam(15)) # Use 8 cores
+library(chromVAR)
+library(motifmatchr)
+library(BSgenome.Hsapiens.UCSC.hg38)
+
+
+pbmc.filter <- RunChromVAR(
+  object = pbmc.filter,
+  genome = BSgenome.Hsapiens.UCSC.hg38
+)
+
+DefaultAssay(pbmc.filter) <- 'chromvar'
+
+#Motif footprinting
+# extract position frequency matrices for the motifs
+pwm <- getMatrixSet(
+  x = JASPAR2020,
+  opts = list(species = 9606, all_versions = FALSE)
+)
+
+# add motif information
+pbmc.filter <- AddMotifs(pbmc.filter, genome = BSgenome.Hsapiens.UCSC.hg38, pfm = pwm)
+
+######################################################################################################################
+DefaultAssay(pbmc.filter) <- 'RNA'
+pbmc.filter <-ScaleData(object=pbmc.filter, features = rownames(pbmc.filter))
+DEG <- FindAllMarkers(pbmc.filter, assay = "RNA", logfc.threshold = 0.5, min.pct = 0.1)  #only.pos = T
+
+
+#heatmap plot
+pbmc.markers.top5<- DEG %>% group_by(cluster) %>% top_n(wt = avg_log2FC , n =  3)
+
+#pbmc.markers.top5 <- pbmc.markers.top5[!grepl("^RP11-", pbmc.markers.top5$gene), ]
+
+p2 <- DoHeatmap(pbmc.filter, features = pbmc.markers.top5$gene, group.by = "ident")+ 
+  theme(axis.text=element_text(size=5))+ 
+  scale_fill_gradientn(colors=c("#192E5B","#1D65A6","#72A2C0","#F3E96B","#F2A104"))
+p2
+ggsave("heatmap_marker_snATAC.pdf", plot = p2, dpi = 600, bg = NULL, height = 8, width = 10)
+
+#Dotplot
+
+# Create the DotPlot
+features <- c("ABCC8", "ARX", "BAIAP3", "IRX2", "CALY",
+              "CELF3", "KCNJ6", "VWA5B2", "C21orf58", "CELSR3", "DNAI1", "GNAO1", "KCNIP1", "CACNA2D2",
+              "CPLX2", "IQSEC3", "KCNH2", "PSD", "SPTBN4", "SYNGR4", "SYT7", "ITPK1", "CDS2", "ZNF441",
+              "WNT4", "SUSD4", "RASGRF1", "MTSS1", "HSPD1", "FAM222A", "SLC30A8",
+              "SYT16", "UNC13A", "LEPR", "LCORL", "ETV1", "THSD7A", "MEIS2", "MEIS1", "KRT7",  "NIPAL1", 
+              "PEBP4", "NUCB2", "ABI3BP", "BNC2",
+              "CPED1", "LRFN5", "PID1", "SLIT2", "ZFHX4", "LTBP1", "GLI3", "CCBE1",
+              "TBXAS1", "SLA", "PIK3R5", "LAPTM5", "ITGB2", "IGSF21", "BLM", "ALOX15B",
+              "BCL11B", "CD247", "GRAP2", "IL2RB", "LCK", "UBASH3A", "MAP4K1", "ITGAL")
+
+
+write.csv(markers, "DEG_snATAC_QC.csv")
+
+FeaturePlot(
+  object = pbmc.filter,
+  features = features,
+  pt.size = 0.1,
+  max.cutoff = 'q95',
+  ncol = 3
+)
+
+
+#Find differentially accessible peaks between cell types
+# change back to working with peaks instead of gene activities
+DefaultAssay(pbmc.filter) <- 'peaks'
+
+da_peaks <- FindAllMarkers(object = pbmc, logfc.threshold = 0.1)
+
+open_da_peaks <- rownames(da_peaks)
+
+
+
+closest_genes_da_peaks <- ClosestFeature(pbmc.filter, regions = open_da_peaks_gr)
+
+DACRs <- merge(closest_genes_da_peaks, da_peaks, by.x = "query_region", by.y = "gene")
+
+write.csv(DACRs, "DACRs_snATAC.csv")
+
+
+data <- read.csv("DACRs_snATAC.csv")
+
+
+
+top_DACR_300 <- DACRs_marker %>%
+  group_by(cluster) %>%
+  top_n(300, wt = avg_log2FC)
+DACRs_marker <-DACRs_marker[!duplicated(DACRs_marker[, c("gene_name", "cluster")]), ]
+
+
+write.csv(top_DACR_300, "Top_DACR_300_snATAC.csv")
+
+top_DACR <- DACRs_marker %>%
+  group_by(cluster) %>%
+  top_n(5, wt = avg_log2FC)
+
+top_DACR <- top_DACR[!duplicated(top_DACR[, c("gene_name", "cluster")]), ]
+
+
+
+valid_clusters <- paste0("cluster_", 0:14)
+
+
+top_DACR$cluster <- factor(top_DACR$cluster, levels = valid_clusters)
+
+top_DACR <- top_DACR %>%
+  arrange(cluster, gene_name)
+
+top_DACR$gene_name <- factor(top_DACR$gene_name, levels = unique(top_DACR$gene_name))
+
+
+#Find differentially accessible peaks between cell types
+# change back to working with peaks instead of gene activities
+DefaultAssay(pbmc.filter) <- 'peaks'
+
+#####Coverage Plot
+genes <- c("CACNA1A", "KCNH2", "SYT7", "LTBP1", "PID1", "TNR", "HHAT", "FMN2", "CACNA2D2", "GNAO1",
+           "FAM222A", "MSR1", "THSD7A", "LMNTD1", "CD36", "STAP2", "FSTL3", "ECE2", "VAT1L", "SLC6A2",
+           "TEX11", "MSR1", "CD96", "GP2", "CUZD1", "SLC43A1", "TMPRSS2", "GPT2", "SDC4", "CA12",
+           "EZR", "SLIT2", "CPED1", "GRIA4", "THSD7A", "SLA", "IL2RB", "LAPTM5", "PRF1", "NOTCH4",
+           "LAPTM5", "TYROBP", "SLA")
+
+
+save_path <- "./Coverage_plot/"
+
+
+for (gene in genes) {
+  
+  plot <- CoveragePlot(
+    object = pbmc,
+    region = gene,
+    extend.upstream = 1000,
+    extend.downstream = 1000
+  )
+  
+  
+  filename <- paste0(save_path, gene, "_CoveragePlot.pdf")
+  
+  ggsave(filename = filename, plot = plot, device = "pdf", width = 8, height = 6)
+}
+
+#######################Motif enrichment####################
+library(Signac)
+library(Seurat)
+library(JASPAR2020)
+library(TFBSTools)
+library(BSgenome.Hsapiens.UCSC.hg38)
+library(patchwork)
+
+#Adding motif information to the Seurat object
+# Get a list of motif position frequency matrices from the JASPAR database
+pfm <- getMatrixSet(
+  x = JASPAR2020,
+  opts = list(collection = "CORE", tax_group = 'vertebrates', all_versions = FALSE)
+)
+
+all_seqs <- seqnames(BSgenome.Hsapiens.UCSC.hg38)
+
+valid_features <- grep(paste(all_seqs, collapse = "|"), rownames(pbmc), value = TRUE)
+pbmc <- subset(pbmc, features = valid_features)
+
+
+# add motif information
+pbmc <- AddMotifs(
+  object = pbmc.filter,
+  genome = BSgenome.Hsapiens.UCSC.hg38,
+  pfm = pfm
+)
+
+differential.activity <- FindMarkers(
+  object = pbmc.filter,
+  ident.1 = 'Pvalb',
+  ident.2 = 'Sst',
+  only.pos = TRUE,
+  mean.fxn = rowMeans,
+  fc.name = "avg_diff"
+)
+
+MotifPlot(
+  object = pbmc.filter,
+  motifs = head(rownames(differential.activity)),
+  assay = 'peaks'
+)
+####################################################################################################
+
+
+save.image("my_workspace_PNET_all.RData")

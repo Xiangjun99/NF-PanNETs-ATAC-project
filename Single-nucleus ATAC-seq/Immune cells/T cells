@@ -1,0 +1,218 @@
+setwd("/vast/palmer/scratch/liu_yang/dw779/DXJ_ATAC/@@@PNET_Proj_Nov/Immune_cells/Tcell_volcano_20250207")
+
+library(Signac)
+library(Seurat)
+library(SeuratWrappers)
+library(monocle3)
+library(Matrix)
+library(ggplot2)
+library(patchwork)
+library(magrittr)
+library(dplyr)
+library(tidyr) 
+library(Seurat)
+library(EnsDb.Hsapiens.v86)
+library(BuenColors)
+
+Tcell <- readRDS("/vast/palmer/scratch/liu_yang/dw779/DXJ_ATAC/@@@PNET_Proj_Nov/Immune_cells/Tcell_updatefrags_0105.rds")
+
+DefaultAssay(Tcell) <- 'peaks'
+
+alphabet <- c('#EB545C','#87C55F','#245297','#F5C96B','#5084C2','#CB7E83','#FF9900','#87C55F','#EB8E7C','#7D9BE5',
+              '#66529F','#DAB2B2','#FC6FCF','#0099FF','#85C17E',
+              '#2B6688','#7D9BE5','#D87070','#AABBCC','#C24976','#DEBF80',
+              '#5F9069','#A37E7D','#B291B5','#8A7197','#3BA997','#7F7F7F',
+              '#73AD96','#95BAA6','#B487B7','#F0CE58','#EF7512','#76A2BB',
+              '#F52831','#F1A93B','#DCCD58','#289E92','#EB8E7C','#469393','#F5D78F'
+)
+
+DimPlot(object = Tcell, label = TRUE, pt.size = 2) +  
+  scale_color_manual(values = alphabet[1:(Tcell@active.ident %>% unique %>% length )])
+
+alphabet1 <- c('#76A2BB','#F1A93B')
+DimPlot(object = Tcell, group.by = "grade", pt.size = 2)+  
+  scale_color_manual(values = alphabet1[1:(Tcell@active.ident %>% unique %>% length )])
+
+#####################Peak analysis ################################################
+#####################Peak analysis ################################################
+library(Seurat)
+library(EnhancedVolcano)
+library(ggplot2)
+library(ggrepel)
+library(dplyr)
+
+DefaultAssay(Tcell) <- 'chromvar'
+
+Idents(Tcell) <- "grade"
+
+
+DefaultAssay(Tcell) <- "chromvar"
+###3 Different TF in celltype
+differential.activity <- FindMarkers(
+  object = Tcell,
+  ident.1 = 'Grade1',
+  ident.2 = 'Grade2',
+  #only.pos = TRUE,
+  mean.fxn = rowMeans,
+  fc.name = "avg_diff"
+)
+
+differential.activity
+differential.activity$gene <- rownames(differential.activity)
+
+differential.activity <- merge(differential.activity, list_motif, by.x = "gene", by.y = "ID", all.x = TRUE)
+
+differential.activity
+
+write.csv(differential.activity, "diff_TF_Tcell_Grade1&Grade2.csv")
+
+
+p1<-EnhancedVolcano(differential.activity,
+                    #lab = rownames(da_peaks1),
+                    lab = differential.activity$name,
+                    x = 'avg_diff',
+                    y = 'p_val_adj',
+                    pCutoff = 0.01,
+                    FCcutoff = 0.5,
+                    pointSize = 1.5,
+                    labSize = 6.0,
+                    title = 'Grade1 vs Grade2')+
+  theme(panel.grid.major = element_blank(), # 去掉主要网格线
+        panel.grid.minor = element_blank())  # 去掉次要网格线
+p1
+ggsave("Tcell_Grade_TFvolcano_FC0.5_p0.01_20250207.pdf", plot = p1, dpi = 600, bg = NULL, height = 10, width = 12)
+
+
+
+frags <- Fragments(Tcell)  # get list of fragment objects
+Fragments(Tcell) <- NULL  # remove fragment information from assay
+newpath <- "/vast/palmer/pi/liu_yang/dw779/@@@dixj/@PNET_project/sn_ATAC_Upstream_data/snATAC_merged_1_fragments_formal/fragments.tsv.gz"
+frags[[1]] <- UpdatePath(frags[[1]], new.path = newpath)  # update path. Do this for any/all fragment objects in the list
+Fragments(Tcell) <- frags  # assign update list of fragment objects back to the assay
+
+"JUNB"
+
+
+CoveragePlot(
+  object = Tcell,
+  region = "JUN",
+  #region.highlight = regions_highlight,
+  extend.upstream = 5000,
+  extend.downstream = 5000
+)
+
+saveRDS(Tcell, file = "Tcell_updatefrags_0105.rds")
+
+#####################motif analysis ################################################
+#####################motif analysis ################################################
+##########motif analysis#################################
+#######################Motif enrichment####################
+library(Signac)
+library(Seurat)
+library(JASPAR2020)
+library(TFBSTools)
+library(BSgenome.Hsapiens.UCSC.hg38)
+library(patchwork)
+library(BiocParallel)
+register(MulticoreParam(15))
+
+library(ggplot2)
+
+#pbmc <- readRDS("pbmc_rm_Doublet_celltype_ExTuImFi_1122.rds")
+
+
+########################################################################################################################
+#Part2
+DefaultAssay(Tcell) <- "chromvar"
+###3 Different TF in celltype
+differential.activity_grade <- FindAllMarkers(
+  object = Tcell,
+  #ident.1 = 'Pvalb',
+  #ident.2 = 'Sst',
+  only.pos = TRUE,
+  mean.fxn = rowMeans,
+  fc.name = "avg_diff"
+)
+
+differential.activity_grade
+
+differential.activity_grade <- merge(differential.activity_grade, list_motif, by.x = "gene", by.y = "ID", all.x = TRUE)
+
+differential.activity_grade
+
+write.csv(differential.activity, "diff_TF_Tcell_allGrade_20250207.csv")
+
+#############
+#Part3, calculate TF matrix
+
+gene_cell_exp <- AverageExpression(Tcell,
+                                   #features = differential.activity_filtered$gene,
+                                   features = differential.activity$gene,
+                                   group.by = 'grade',
+                                   layer = 'data',
+                                   assays = 'chromvar') 
+gene_cell_exp <- as.data.frame(gene_cell_exp$chromvar)
+
+mat =gene_cell_exp1
+
+#label gene
+top6 = differential.activity_grade %>% group_by(cluster) %>% top_n(n = 6, wt = avg_diff)
+
+#plot
+pdf('heatmap_TF activity_Tcell_grade_20250206.pdf', width=4, height=6)
+heata = Heatmap(mat ,
+                    data_scale = F,
+                    Order_col = colnames(mat),
+                    legendTitle = "z-score",
+                    point_size = 5,
+                    heat_col = c('#006837','#a6d96a','white','#fdae61','#d73027'),
+                    #heat_col = brewer.pal(n = 5, name = "RdYlBu"),
+                    TitlePosition = "leftcenter-rot",
+                    legend_at = c(-4,-2,0,2,4),
+                    legend_Lab = c(-4,-2,0,2,4),
+                    column_names_gp = gpar(fontsize = 6),
+                    row_names_gp = gpar(fontsize = 6),
+                    customRowLabel=top6$name, #annotation
+                    colanno_color = c("#66529F","#FF9900","#5084C2","#EB545C","#7D9BE5","#EB8E7C","#F5C96B","#87C55F","#289E92"))
+#rowAnn = T,
+#rowAnno_num = c(10,10,10,10,10,10,10))
+
+draw(heata, merge_legends = TRUE,heatmap_legend_side = "right") 
+dev.off()
+
+
+############Motif enrich in  each cell type plot:line############
+############Motif enrich in  each cell type plot:line############
+differential.activity_filtered=differential.activity_grade
+
+differential.activity_filtered$`-log10(p_val_adj)` <- -log10(differential.activity_filtered$p_val_adj)
+
+
+print(differential.activity_filtered)
+
+
+df <- data.frame(TF = differential.activity_filtered$name, mlog10Padj = differential.activity_filtered$`-log10(p_val_adj)`, 
+                 celltype = differential.activity_filtered$cluster)
+
+df <- df[order(df$mlog10Padj, decreasing = TRUE),]
+df$rank <- seq_len(nrow(df))
+
+head(df)
+
+library(RColorBrewer)
+library(ggrepel)
+library(BuenColors)
+library(ggsci)
+
+ggplot(df, aes(rank, mlog10Padj, color = mlog10Padj)) + 
+  geom_point(size = 1) +  
+  ggrepel::geom_label_repel(
+    data = df[rev(seq_len(min(nrow(df), 30))), ], aes(x = rank, y = mlog10Padj, label = TF), 
+    size = 1.5,
+    nudge_x = 2,
+    color = "black"           
+  ) + 
+  theme_classic() + 
+  ylab("-log10(P-adj) Motif Enrichment") +
+  xlab("Rank Sorted TFs Enriched") +
+  scale_color_gradientn(colors = c("#fff5f0", "#ea8171", "#b13f64"))

@@ -1,0 +1,599 @@
+dir = "/vast/palmer/scratch/liu_yang/dw779/@@PNET_202506/celltype_identification/PNET146"
+setwd(dir)
+
+
+library(Signac)
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+library(rhdf5)
+library(Matrix)
+library(sctransform)
+library(plyr)
+library(gridExtra)
+library(magrittr)
+library(tidyr)
+library(raster)
+library(OpenImageR)
+library(ggpubr)
+library(grid)
+library(wesanderson)
+library(cowplot)
+library(dittoSeq)
+library(GenomicRanges)
+library(EnsDb.Hsapiens.v86)
+library(BuenColors)
+library(clusterProfiler)
+library(msigdbr)
+library(dplyr)
+library(enrichplot)
+library(DOSE)
+library(org.Hs.eg.db)
+library(forcats)
+library(dittoSeq)
+library(aPEAR)
+library(msigdbr)
+
+
+pbmc_146 <- readRDS("./PNET146/PNET146_filtercells_celltype_250610.rds")
+
+#######filter the cell outlier from tissue in the counts##########################################
+counts <- Read10X_h5(filename = "/vast/palmer/scratch/liu_yang/dw779/DXJ_ATAC/@@@PNET_Proj_Nov/@spatial_PNET_ATAC/GI146/CellRanger/GI146/outs/raw_peak_bc_matrix.h5")
+
+#transfer barcode to position(AXB)
+A <- data.frame(counts@Dimnames[[2]])
+A$X = A$counts.Dimnames..2..
+
+A$X <- gsub("-1$","",A$X)
+
+lookup = read.table("lookup.csv", as.is = TRUE, sep = ",")
+
+temp = lookup[match(A$X,lookup$V1),"V2"]
+
+A$name =temp
+
+#add position information to remove the cell outlier of tissue
+location <- read.table("146_position.txt", sep =",", header = FALSE, dec =".", stringsAsFactors = F)
+x <- as.character(location[1,])
+x = x[-1]
+
+A_filtered <- A[A$name %in% x,]
+A_filtered$counts.Dimnames..2..<- NULL
+#A_filtered$X <- NULL
+
+A_filtered$X <- paste0(A_filtered$X, "-1")
+
+filtered_counts <- counts[, colnames(counts) %in% A_filtered$X]
+
+##################################################################################################
+
+metadata <- read.csv(
+  file = "/vast/palmer/scratch/liu_yang/dw779/DXJ_ATAC/@@@PNET_Proj_Nov/@spatial_PNET_ATAC/GI146/CellRanger/GI146/outs/singlecell.csv",
+  header = TRUE,
+  row.names = 1
+)
+
+chrom_assay <- CreateChromatinAssay(
+  counts = filtered_counts,
+  sep = c(":", "-"),
+  fragments = "/vast/palmer/scratch/liu_yang/dw779/DXJ_ATAC/@@@PNET_Proj_Nov/@spatial_PNET_ATAC/GI146/CellRanger/GI146/outs/fragments.tsv.gz",
+  min.cells = 0,
+  min.features = 0
+)
+
+pbmc_146 <- CreateSeuratObject(
+  counts = chrom_assay,
+  assay = "peaks",
+  meta.data = metadata
+)
+
+pbmc_146
+granges(pbmc_146)
+
+peaks.keep <- seqnames(granges(pbmc_146)) %in% standardChromosomes(granges(pbmc_146))
+pbmc_146 <- pbmc_146[as.vector(peaks.keep), ]
+
+library(AnnotationHub)
+ah <- AnnotationHub()
+
+# Search for the Ensembl 98 EnsDb for Homo sapiens on AnnotationHub
+query(ah, "EnsDb.Hsapiens.v98")
+
+ensdb_v98 <- ah[["AH75011"]]
+
+# extract gene annotations from EnsDb
+annotations <- GetGRangesFromEnsDb(ensdb = ensdb_v98)
+
+# change to UCSC style since the data was mapped to hg38
+seqlevels(annotations) <- paste0('chr', seqlevels(annotations))
+genome(annotations) <- "hg38"
+
+# add the gene information to the object
+Annotation(pbmc_146) <- annotations
+
+
+#Normalization and dimension reduction
+pbmc_146 <- RunTFIDF(pbmc_146)
+pbmc_146 <- FindTopFeatures(pbmc_146, min.cutoff = 'q0')
+pbmc_146 <- RunSVD(pbmc_146)
+
+DepthCor(pbmc_146)
+
+pbmc_146 <- RunUMAP(object = pbmc_146, reduction = 'lsi', dims = 2:10)
+pbmc_146 <- FindNeighbors(object = pbmc_146, reduction = 'lsi', dims = 2:10)
+pbmc_146 <- FindClusters(object = pbmc_146, verbose = FALSE, algorithm = 3)
+DimPlot(object = pbmc_146, label = TRUE) + NoLegend()
+
+#alphabet = c("#5084C2","#F5C96B","#EB545C",'#DBA091','#85C17E')
+alphabet = c("Tumor1"="#5084C2",
+             "Tumor2"="#F5C96B",
+             "Fibroblast"="#EB545C",
+             "Immunecells"='#85C17E',
+             "Exocrine"='#DBA091',
+             "Lowquality"='#DBA091'
+             )
+
+p1 <- DimPlot(pbmc_146) + 
+  scale_color_manual(values = alphabet[1:(pbmc_146@active.ident %>% unique %>% length )])
+p1
+ggsave("PNET146_UMAP_celltype_20250625.pdf", plot = p1, width = 6, height = 5)
+
+ident <- Idents(pbmc_146)
+df <- data.frame(ident[])
+df1 <-data.frame(X =row.names(df), count= df$ident..)
+
+df1$X <- gsub("-1$", "", df1$X)
+
+lookup = read.table("lookup.csv", as.is = TRUE, sep = ",")
+
+temp = lookup[match(df1$X,lookup$V1),"V2"]
+
+df1$name =temp
+
+test <- df1 %>% separate(name, c("A", "B"),  sep = "x")
+
+
+
+#g <- rasterGrob(imported_raster, width=unit(1,"npc"), height=unit(1,"npc"), interpolate = FALSE)
+pdf(file = paste("PNET146_Spatialcluster_celltype_0625.pdf",sep =""), width=8.6, height=8.6)
+ggplot(test, aes(x = as.numeric(A), y = as.numeric(B), color=count)) + 
+  scale_color_manual(values = alphabet[1:(pbmc_146@active.ident %>% unique %>% length )]) + 
+  #scale_color_gradientn(colours = c("black", "green")) + 
+  #scale_color_gradientn(colours = c("blue","green", "red"),
+  #                      oob = scales::squish) +
+  ggtitle("UMAP") +
+  #annotation_custom(g, xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf) +
+  geom_point(shape = 16, size = 4.5)+
+  expand_limits(x = 0, y = 0) +
+  scale_x_continuous(name="X", limits = c(NA, NA), expand = expansion(mult = c(-0.013, -0.013))) +
+  scale_y_reverse(name="Y", limits = c(NA, NA), expand = expansion(mult = c(-0.013, 0.008))) +
+  coord_equal(xlim=c(0,51),ylim=c(51,1)) +
+  theme(plot.title = element_text(hjust = 0.8, size = 25, face = "bold"),
+        #axis.text=element_text(size=20),
+        #axis.title=element_text(size=20,face="bold"),
+        legend.text=element_text(size=20),
+        legend.title = element_blank(),
+        #legend.title = element_text(colour="black", size=15, face="bold"),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        #axis.text.x = element_blank(), axis.text.y = element_blank(),
+        #axis.ticks.x = element_blank(), axis.ticks.y = element_blank(),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_blank()) +   
+  theme(plot.background = element_rect(fill = "black"))
+dev.off()
+
+saveRDS(pbmc_146, file = "PNET146_filter_cells_outlier_tissue.rds")
+
+#revise the fragment path
+frags <- Fragments(pbmc_146)  # get list of fragment objects
+Fragments(pbmc_146) <- NULL  # remove fragment information from assay
+newpath <- "/vast/palmer/pi/liu_yang/dw779/@@@dixj/DXJ_ATAC/@@@PNET_Proj_Nov/@spatial_PNET_ATAC/GI146/CellRanger/GI146/outs/fragments.tsv.gz"
+frags[[1]] <- UpdatePath(frags[[1]], new.path = newpath)  # update path. Do this for any/all fragment objects in the list
+Fragments(pbmc_146) <- frags  # assign update list of fragment objects back to the assay
+
+#create a gene activity matrix
+gene.activities <- GeneActivity(pbmc_146)
+
+# add the gene activity matrix to the Seurat object as a new assay and normalize it
+pbmc_146[['RNA']] <- CreateAssayObject(counts = gene.activities)
+pbmc_146 <- NormalizeData(
+  object = pbmc_146,
+  assay = 'RNA',
+  normalization.method = 'LogNormalize',
+  scale.factor = median(pbmc_146$nCount_RNA)
+)
+
+DefaultAssay(pbmc_146) <- 'RNA'
+
+marker.genes <- unique(c(
+  "ARX","IRX2","KRT8","MEN1",#tumor
+  "GCK", "CHGA", "CHGB", "SYP", "CACNA2D2",
+  "CPLX2", "IQSEC3", "KCNH2", "PSD", "SPTBN4", "SYNGR4", "SYT7", "ITPK1", #islet
+  "CPB1", "CFTR", "TSPAN8", # exocrine
+  "FN1", "COL6A1", "COL6A2", "CD9","EMP1", # fibroblast
+  "CD83", "CD86", # B cells
+  "CD8A",  # CD8 T cells
+  "CD4", # CD4 T cells
+  "IL2RB", # NK cells
+  "FLT3", "IRF8", # cDCs
+  "CD68", "CD163"# macrophages
+))
+#"VWF", "PECAM1", "FLT4", "FLT1", "FLT3", "TRIM24", # endothelial
+
+p3 <- DotPlot(pbmc_146, features=marker.genes, cols="RdBu") + theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) 
+p3
+ggsave(filename = "./@SpatialPNET_20250610/PNET146_markergene_Dotplot_celltype.pdf", plot = p3, height = 6, width = 12)
+
+#add celltype
+new.cluster.ids <- c(
+  "0" = "Tumor1", "1" = "Fibroblast", "2" = "Tumor2", "3" = "Exocrine", "4" = "Immunecells"
+)
+
+pbmc_146 <- RenameIdents(pbmc_146, new.cluster.ids)                        
+
+pbmc_146$celltype <- pbmc_146@active.ident
+
+pbmc_146
+
+saveRDS(pbmc_146, file = "./@SpatialPNET_20250610/PNET146_filtercells_celltype_250610.rds")
+
+
+
+##############Msigdb pathway analysis########################################################################################
+
+# Msigdb pathway enrich analysis
+DefaultAssay(pbmc_146) <- 'RNA'
+
+######1.find DEGs and transfer to standard format
+diff <- FindAllMarkers(pbmc_146, assay = "RNA", logfc.threshold = 0.4, min.pct = 0.01)  #only.pos = T
+
+#cluster information
+group <- data.frame(gene=diff$gene,
+                    group=diff$cluster)#分组情况
+
+#gene转化为ID
+Gene_ID <- bitr(diff$gene, fromType="SYMBOL", 
+                toType="ENTREZID", 
+                OrgDb="org.Hs.eg.db")
+
+#构建文件并分析
+data  <- merge(Gene_ID,group,by.x='SYMBOL',by.y='gene')
+
+#---------------------step 2 msigdb hallmark pathway-----------------------------
+
+######1.prepare msigdb hallmark pathway set
+msig_hallmark <- msigdbr(species = "Homo sapiens", category = "H")
+
+######2.prepare background gene, gene detected in more than 0.1% of total tumor cells
+raw_counts <- data.frame(pbmc_146@assays[["RNA"]]@counts)
+gene_detection_rate <- rowSums(raw_counts > 0) / ncol(raw_counts)
+background_genes <- rownames(raw_counts)[gene_detection_rate > 0.001]
+length(background_genes)
+
+#gene name transfer to entrezID
+entrezID_background <- bitr(background_genes,
+                            fromType = "SYMBOL",
+                            toType = "ENTREZID",
+                            OrgDb = "org.Hs.eg.db")#genesymbol转化为ID
+
+
+######3.pathway enrich analysis
+pathway_enrich <- compareCluster(
+  ENTREZID~group, 
+  data=data, 
+  fun="enricher", 
+  #OrgDb="org.Hs.eg.db",
+  #ont = "ALL",
+  universe = entrezID_background$ENTREZID, 
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.25,
+  qvalueCutoff = 0.25,
+  TERM2GENE = msig_hallmark_list, # MSigDB Hallmark 基因集
+  TERM2NAME = NA
+)
+
+p8 <- dotplot(pathway_enrich, showCategory=30,font.size = 8)+
+  #scale_color_gradientn(colors = jdb_palette("brewer_heat"))+
+  theme(
+    panel.grid.major = element_blank(),  # 去掉主网格线
+    panel.grid.minor = element_blank(),  # 去掉次网格线
+    panel.background = element_blank()   # 去掉背景
+  )
+p8
+#save plot
+ggsave("PNET146_Msigdb_pathway_tumor_0625.pdf", plot = p8, width = 8, height =10) #change name
+write.csv(msigdb_pathway_enrich, file = "PNET146_msigdb_pathway_enrich_0625.csv")
+
+df_KEGG <- read.csv(file="PNET146_msigdb_pathway_enrich.csv")
+
+p1 = ggplot(df_KEGG, aes(x = Count, y = Description_label, fill = Cluster)) +
+  geom_bar(stat = "identity", width = 0.5) +
+  
+  geom_text(aes(x = 0.1, y = Description_label, label = Description),
+            size = 3.5, hjust = 0) +
+  
+  theme_classic() +
+  theme(
+    axis.text.y = element_blank(),
+    axis.title.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.line = element_line(colour = 'black', linewidth = 0.5),
+    axis.text.x = element_text(colour = 'black', size = 10),
+    axis.ticks.x = element_line(colour = 'black'),
+    axis.title.x = element_text(colour = 'black', size = 12),
+    legend.position = "none"
+  ) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_fill_manual(values = c(
+    "Tumor1" = "#5084C2",
+    "Tumor2" = "#F5C96B",
+    "Fibroblast" = "#EB545C",
+    "Immunecells" = '#85C17E'
+  )) +
+  
+  geom_text(aes(x = 0.1, y = Description_label, label = geneID, color = Cluster),
+            size = 4,
+            fontface = 'italic', 
+            hjust = 0,
+            vjust = 2.3) +
+  
+  scale_color_manual(values = c(
+    "Tumor1" = "#5084C2",
+    "Tumor2" = "#F5C96B",
+    "Fibroblast" = "#EB545C",
+    "Immunecells" = '#85C17E'
+  )) +
+  
+  scale_y_discrete(expand = c(0.1, 0)) +
+  ggtitle("Enrichment of celltype marker genes")
+
+p1
+
+df_anno <- df_KEGG["Cluster"]
+
+library(ggplot2)
+library(dplyr)
+
+df_anno$y <- nrow(df_anno):1  
+
+df_label <- df_anno %>%
+  group_by(Cluster) %>%
+  summarise(
+    y = mean(y),  
+    .groups = "drop"
+  )
+
+p2 <- ggplot(df_anno, aes(x = 1, y = y, fill = Cluster)) +
+  geom_tile(width = 1, height = 1, alpha = 1) + 
+  geom_text(data = df_label,
+            aes(x = 1, y = y, label = Cluster),
+            size = 4,
+            fontface = 'italic',
+            angle = 90) +
+  scale_fill_manual(values = c( "Tumor1" = "#5084C2",
+                                "Tumor2" = "#F5C96B",
+                                "Fibroblast" = "#EB545C",
+                                "Immunecells" = '#85C17E')) +
+  theme_classic() +
+  theme(
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    axis.ticks = element_blank(),
+    axis.line = element_blank(),
+    legend.position = "none"
+  ) +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_x_continuous(expand = c(0, 0))
+
+p2
+
+p_combined <- ggarrange2(p2, p1, nrow = 1, widths = c(0.05, 1))
+
+ggsave("P146—pathway-enrich_plot_GeneCount_250702.pdf", plot = p_combined, width = 5, height = 5)
+
+      
+############################peak analysis############################
+
+library(Seurat)
+library(EnhancedVolcano)
+library(ggplot2)
+library(ggrepel)
+library(dplyr)
+
+DefaultAssay(pbmc_146) <- 'peaks'
+
+da_peaks <- FindAllMarkers(pbmc_146, assay = "peaks", logfc.threshold = 1.5, min.pct = 0.1)  #only.pos = T
+da_peaks$closest_gene <- ClosestFeature(pbmc_146, regions = rownames(da_peaks))$gene_name
+
+da_peaks_filtered <-da_peaks[da_peaks$p_val_adj < 0.001, ]
+
+#da_peaks_filtered=da_peaks_name
+write.csv(da_peaks_filtered, file = "PNET146_Tumor_DAP_exp_matrix_heatmap_2025625.csv")
+
+################################################################################
+###by celltype
+#pbmc_146$clusters <- pbmc_146@active.ident
+
+gene_cell_exp <- AverageExpression(pbmc_146,
+                                   features = da_peaks_filtered$gene,
+                                   group.by = 'celltype',
+                                   layer = 'data',
+                                   assays = 'peaks') 
+
+gene_cell_exp <- as.data.frame(gene_cell_exp$peaks)
+
+mat =gene_cell_exp
+write.csv(mat, file = "Tumor_DAP_exp_matrix_heatmap_20250121.csv")
+
+top6 = da_peaks_filtered %>% group_by(cluster) %>% top_n(n = 5, wt = avg_log2FC)
+top6$name <- paste(top6$gene, top6$closest_gene, sep = "-")
+#plot
+library(grid)
+
+pdf('PNET146_heatmap1_diff_Peak_tumor_0625.pdf', width=8, height=8)
+heata = Heatmap(mat ,
+                    data_scale = F,
+                    Order_col = colnames(mat),
+                    legendTitle = "z-score",
+                    point_size = 5,
+                    heat_col = c('#4575b4','#abd9e9','white','#f46d43','#d73027'),
+                    #heat_col = brewer.pal(n = 5, name = "RdYlBu"),
+                    TitlePosition = "leftcenter-rot",
+                    legend_at = c(-8,-4,0,4,8),
+                    legend_Lab = c(-8,-4,0,4,8),
+                    column_names_gp = gpar(fontsize = 6),
+                    row_names_gp = gpar(fontsize = 6),
+                    customRowLabel=top6$name,
+                    #customRowLabel=genes,
+                    colanno_color = c("#FF9900", "#7D9BE5", "#DAB2B2", "#66529F", "#87C55F", "#289E92", "#EB545C", "#5084C2",
+                                      "#F5D78F"))
+
+draw(heata, merge_legends = TRUE,heatmap_legend_side = "right") 
+dev.off()
+
+#####################motif analysis ################################################
+#####################motif analysis ################################################
+##########motif analysis#################################
+#######################Motif enrichment####################
+library(Signac)
+library(Seurat)
+library(JASPAR2020)
+library(TFBSTools)
+library(BSgenome.Hsapiens.UCSC.hg38)
+library(patchwork)
+library(BiocParallel)
+register(MulticoreParam(25))
+
+library(ggplot2)
+
+#pbmc <- readRDS("pbmc_rm_Doublet_celltype_ExTuImFi_1122.rds")
+
+
+############################################################################
+###Part1
+
+# Get a list of motif position frequency matrices from the JASPAR database
+pfm <- getMatrixSet(
+  x = JASPAR2020,
+  opts = list(collection = "CORE", tax_group = 'vertebrates', all_versions = FALSE)
+)
+
+# add motif information
+pbmc_146 <- AddMotifs(
+  object = pbmc_146,
+  genome = BSgenome.Hsapiens.UCSC.hg38,
+  pfm = pfm
+)
+
+########################################################################################################################
+#Part2
+
+pbmc_146 <- RunChromVAR(
+  object = pbmc_146,
+  genome = BSgenome.Hsapiens.UCSC.hg38
+)
+
+DefaultAssay(pbmc_146) <- "chromvar"
+###3 Different TF in celltype
+differential.activity <- FindAllMarkers(
+  object = pbmc_146,
+  #ident.1 = 'Pvalb',
+  #ident.2 = 'Sst',
+  #only.pos = TRUE,
+  mean.fxn = rowMeans,
+  fc.name = "avg_diff"
+)
+
+differential.activity
+
+differential.activity <- merge(differential.activity, list_motif, by.x = "gene", by.y = "ID", all.x = TRUE)
+
+differential.activity
+
+write.csv(differential.activity, "PNET146_diff_TF_tumor_20250625.csv")
+
+#############
+
+gene_cell_exp <- AverageExpression(pbmc_146,
+                                   #features = differential.activity_filtered$gene,
+                                   features = differential.activity$gene,
+                                   group.by = 'celltype',
+                                   layer = 'data',
+                                   assays = 'chromvar') 
+gene_cell_exp <- as.data.frame(gene_cell_exp$chromvar)
+
+mat =gene_cell_exp1
+
+#label gene
+#top6 = differential.activity_filtered %>% group_by(cluster) %>% top_n(n = 6, wt = avg_diff)
+top6 = differential.activity %>% group_by(cluster) %>% top_n(n = 6, wt = avg_diff)
+
+genes <- unique(c(
+  "FOXI1","HNF1A","FOXA2","SOX9","TP53","HNF4A","SOX2","EBF1","INSM1","HNF4G",
+  "PRDM1","LHX2","LEF1","TCF7","POU4F1","TFAP2B","HOXB5","ASCL1",
+  "SOX14","EBF3","FOXA3","NR2F2","MEF2D","VEZF1"
+))
+
+
+column_order <- c("Tumor-1", "Tumor-2", "Tumor-3", "Tumor-4", "Tumor-5", "Tumor-6", "Tumor-7", "Tumor-8", "Tumor-9", "Tumor-10")
+mat <- mat[, column_order]
+
+
+#plot
+pdf('PNET146_heatmap1_TF activity_20250625.pdf', width=6, height=8)
+heata = Heatmap(mat ,
+                    data_scale = F,
+                    Order_col = colnames(mat),
+                    legendTitle = "z-score",
+                    point_size = 5,
+                    heat_col = c('#006837','#a6d96a','white','#fdae61','#d73027'),
+                    #heat_col = brewer.pal(n = 5, name = "RdYlBu"),
+                    TitlePosition = "leftcenter-rot",
+                    legend_at = c(-4,-2,0,2,4),
+                    legend_Lab = c(-4,-2,0,2,4),
+                    column_names_gp = gpar(fontsize = 6),
+                    row_names_gp = gpar(fontsize = 6),
+                    customRowLabel=top6$name, #annotation
+                    #customRowLabel=genes, #annotation
+                    #customRowLabel=rownames(mat), #annotation
+                    colanno_color = c("#66529F","#FF9900","#5084C2","#EB545C","#7D9BE5","#EB8E7C","#F5C96B","#87C55F","#289E92"))
+draw(heata, merge_legends = TRUE,heatmap_legend_side = "right") 
+dev.off()
+
+
+############Motif enrich in  each cell type plot:line############
+############Motif enrich in  each cell type plot:line############
+differential.activity_filtered=differential.activity
+differential.activity_filtered$`-log10(p_val_adj)` <- -log10(differential.activity_filtered$p_val_adj)
+
+print(differential.activity_filtered)
+
+df <- data.frame(TF = differential.activity_filtered$name, mlog10Padj = differential.activity_filtered$`-log10(p_val_adj)`, 
+                 celltype = differential.activity_filtered$cluster)
+
+df <- df[order(df$mlog10Padj, decreasing = TRUE),]
+df$rank <- seq_len(nrow(df))
+
+ggplot(df, aes(rank, mlog10Padj, color = mlog10Padj)) + 
+  geom_point(size = 1) +  
+  ggrepel::geom_label_repel(
+    data = df[rev(seq_len(min(nrow(df), 30))), ], aes(x = rank, y = mlog10Padj, label = TF), 
+    size = 1.5,
+    nudge_x = 2,
+    color = "black"           
+  ) + 
+  theme_classic() + 
+  ylab("-log10(P-adj) Motif Enrichment") +
+  xlab("Rank Sorted TFs Enriched") +
+  scale_color_gradientn(colors = c("#fff5f0", "#ea8171", "#b13f64"))
+
+
+################################################################################
+################################################################################
+
+saveRDS(pbmc_146, file="PNET146_filtercells_celltype_TFmotif_V2_250625.rds")
+save.image("PNET146_workspace_TFmotif_V2_250625.RData")
+save(pbmc_146, file="PNET146_filtercells_celltype_TFmotif_V2_250625.rdata")

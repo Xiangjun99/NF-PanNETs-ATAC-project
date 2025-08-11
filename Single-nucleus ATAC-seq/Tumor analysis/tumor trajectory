@@ -1,0 +1,155 @@
+setwd("/vast/palmer/scratch/liu_yang/dw779/DXJ_ATAC/@@@PNET_Proj_Nov/Tumor/2nd_celltype_1210_All_Tumor/Tumor_trajectory")
+
+library(Signac)
+library(Seurat)
+library(SeuratWrappers)
+library(monocle3)
+library(Matrix)
+library(ggplot2)
+library(patchwork)
+library(magrittr)
+library(dplyr)
+library(tidyr) 
+library(Seurat)
+library(EnsDb.Hsapiens.v86)
+library(BuenColors)
+library(clusterProfiler)
+library(msigdbr)
+library(dplyr)
+library(enrichplot)
+library(DOSE)
+library(org.Hs.eg.db)
+library(forcats)
+library(dittoSeq)
+library(aPEAR)
+library(msigdbr)
+
+
+# --------------------- monocle3 visualization 1: build trajectory -----------------------------
+# Default assay set to peaks (ATAC data)
+DefaultAssay(endocrine1) <- 'peaks' 
+
+# --------------------- monocle3 visualization 1: gene modules -----------------------------
+# Load precomputed cell_data_set object
+mycds2 <- readRDS("endocrine1.cds_Peaktrajectory_20250122.rds")
+
+# Step 2: dimensionality reduction and clustering
+mycds2 <- preprocess_cds(mycds2, num_dim = 100) # PCA by default
+
+# Identify genes/peaks with significant variation along trajectory
+mycds2_res <- graph_test(mycds2, neighbor_graph = "principal_graph", cores = 15)
+write.csv(mycds2_res, file = "Tumor_Peak_mycds2_res_trajectory_20250122.csv")
+
+res_ids <- row.names(subset(mycds2_res, q_value < 0.01))
+
+# Cluster significant genes into co-expression modules
+gene_module_df <- find_gene_modules(
+  mycds2[res_ids,], 
+  resolution = c(10^seq(-6,-1))
+)
+write.csv(gene_module_df, file = "Tumor_Peak_mycds2_module_20250122.csv")
+
+# Cell group info
+cell_group_df <- tibble::tibble(
+  cell = row.names(colData(mycds2)), 
+  cell_group = colData(mycds2)$celltype
+)
+
+# Aggregate expression per module per cell group
+agg_mat <- aggregate_gene_expression(mycds2, gene_module_df, cell_group_df)
+row.names(agg_mat) <- stringr::str_c("Module", row.names(agg_mat))
+
+# Plot heatmap of aggregated module expression
+p2 <- pheatmap::pheatmap(
+  agg_mat,
+  scale = "column", 
+  clustering_method = "ward.D2"
+)
+ggsave(filename = "Tumor_peak_module_trajectory_20250122.pdf", plot = p2, height = 8, width = 8)
+
+# Split modules and save each as CSV
+modules_list <- split(gene_module_df, gene_module_df$module)
+if (!dir.exists("module_list")) dir.create("module_list")
+lapply(names(modules_list), function(module_name) {
+  write.csv(
+    modules_list[[module_name]], 
+    file = file.path("module_list", paste0(module_name, "_module.csv")), 
+    row.names = FALSE
+  )
+})
+
+# --------------------- monocle3 visualization 2: Heatmap -----------------------------
+# Select significant genes
+genes <- row.names(subset(mycds2_res, q_value < 0.001 & morans_I > 0.035))
+
+# Or keep all peaks (uncomment if needed)
+# genes <- row.names(subset(mycds2_res))
+
+# Extract expression matrix and order by pseudotime
+plot_matrix <- exprs(mycds2)[
+  match(genes, rownames(rowData(mycds2))),
+  order(pseudotime(mycds2))
+]
+
+# Smooth and z-score transform
+plot_matrix <- t(apply(plot_matrix, 1, function(x) { smooth.spline(x, df = 3)$y }))
+plot_matrix <- t(apply(plot_matrix, 1, function(x) { (x - mean(x)) / sd(x) }))
+rownames(plot_matrix) <- genes
+
+# Merge columns for large datasets
+cutColumn_Means <- function(data_exp, cut) {
+  plot_matrix_combin <- list()
+  nums <- ncol(data_exp) / cut
+  if (nums - round(nums, 0) == 0) {
+    for (i in seq(1, ncol(data_exp), cut)) {
+      A <- rowMeans(data_exp[, i:(cut + i - 1)])
+      plot_matrix_combin[[length(plot_matrix_combin) + 1]] <- A
+    }
+  } else {
+    for (i in seq(1, ncol(data_exp) - cut, cut)) {
+      A <- rowMeans(data_exp[, i:(cut + i - 1)])
+      plot_matrix_combin[[length(plot_matrix_combin) + 1]] <- A
+    }
+    plot_matrix_combin[[length(plot_matrix_combin) + 1]] <- rowMeans(data_exp[, (max(seq(1, ncol(data_exp) - cut, cut)) + cut):ncol(data_exp)])
+  }
+  plot_matrix_combin <- do.call(cbind, plot_matrix_combin)
+  rownames(plot_matrix_combin) <- rownames(data_exp)
+  colnames(plot_matrix_combin) <- seq_len(ncol(plot_matrix_combin))
+  return(plot_matrix_combin)
+}
+
+plot_matrix_combin <- cutColumn_Means(plot_matrix, cut = 50)
+
+# Heatmap plotting
+callback <- function(hc, mat) {
+  sv <- svd(t(mat))$v[, 1]
+  dend <- reorder(as.dendrogram(hc), wts = sv)
+  as.hclust(dend)
+}
+
+p3 <- pheatmap::pheatmap(
+  plot_matrix_combin, 
+  useRaster = TRUE,
+  cluster_cols = FALSE, 
+  cluster_rows = TRUE, 
+  show_rownames = FALSE, 
+  show_colnames = FALSE, 
+  clustering_method = "ward.D2",
+  cutree_rows = 4,
+  filename = NA,
+  border_color = NA,
+  fontsize_row = 8,
+  color = colorRampPalette(c('#1A5592', 'white', "#B83D3D"))(100),
+  clustering_callback = callback
+)
+
+ggsave(filename = "Tumor_peak_trajectory_heatmap_V1_20250211.pdf", plot = p3, height = 8, width = 6)
+
+# Extract module genes from heatmap clustering
+module_gene <- as.data.frame(cutree(p3$tree_row, k = 4))
+colnames(module_gene) <- "Module"
+module_gene$gene <- rownames(module_gene)
+module_gene$closest_gene <- ClosestFeature(endocrine1, regions = rownames(module_gene))$gene_name
+write.csv(module_gene, file = "module_peak_trajectory_V1_20250211.csv")
+
+
