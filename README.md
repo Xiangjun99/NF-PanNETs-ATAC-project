@@ -2,7 +2,7 @@
 
 This repository contains the code for the manuscript "Spatial Epigenomic Landscape of Non-Functional Pancreatic Neuroendocrine Tumors Defines Tumor Heterogeneity and Progression". In this work, we present an integrative analysis combining single-nucleus ATAC-seq (snATAC-seq) and spatial ATAC-seq across multiple tumor grades. snATAC-seq delineates the chromatin accessibility landscapes of distinct tumor subtypes, immune cells, and cancer-associated fibroblasts (CAFs), revealing key transcription factor (TF) programs that drive tumor progression and shape microenvironmental interactions.   
 
-![Overview of analysis](Figures/scheme.tif)
+![Overview of analysis](https://raw.githubusercontent.com/Xiangjun99/NF-PanNETs-ATAC-project/main/Figures/scheme.png)
 
 It includes: 
 (1)code for processing and analyzing single-nucleus ATAC-seq;
