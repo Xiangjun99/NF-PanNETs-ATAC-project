@@ -1,4 +1,4 @@
-library(Signac)
+ library(Signac)
 library(Seurat)
 library(SeuratWrappers)
 library(monocle3)
@@ -111,7 +111,6 @@ ggsave("immune_markergene_Dotplot3-20241231.pdf", plot = p6, dpi = 600, bg = NUL
 
 saveRDS(immune, file="immune_celltype3_20241231.rds")
 
-# Msigdb pathway enrich analysis
 DefaultAssay(immune) <- 'RNA'
 
 ######1.find DEGs and transfer to standard format
@@ -128,50 +127,6 @@ Gene_ID <- bitr(diff$gene, fromType="SYMBOL",
 
 #构建文件并分析
 data  <- merge(Gene_ID,group,by.x='SYMBOL',by.y='gene')
-
-#---------------------step 2 msigdb hallmark pathway-----------------------------
-
-######1.prepare msigdb hallmark pathway set
-msig_hallmark <- msigdbr(species = "Homo sapiens", category = "H")
-msig_hallmark_list <- msig_hallmark[, c("gs_name", "entrez_gene")]
-
-######2.prepare background gene, gene detected in more than 0.1% of total tumor cells
-raw_counts <- data.frame(immune@assays[["RNA"]]@counts)
-gene_detection_rate <- rowSums(raw_counts > 0) / ncol(raw_counts)
-background_genes <- rownames(raw_counts)[gene_detection_rate > 0.001]
-length(background_genes)
-
-#gene name transfer to entrezID
-entrezID_background <- bitr(background_genes,
-                            fromType = "SYMBOL",
-                            toType = "ENTREZID",
-                            OrgDb = "org.Hs.eg.db")
-
-
-######3.pathway enrich analysis
-pathway_enrich <- compareCluster(
-  ENTREZID~group, 
-  data=data, 
-  fun="enricher", 
-  #OrgDb="org.Hs.eg.db",
-  #ont = "ALL",
-  universe = entrezID_background$ENTREZID, 
-  pAdjustMethod = "BH",
-  pvalueCutoff = 0.05,
-  qvalueCutoff = 0.05,
-  TERM2GENE = msig_hallmark_list, 
-  TERM2NAME = NA
-)
-
-#save plot
-ggsave("Msigdb_pathway_immune-20241231.pdf", plot = p7, width = 8, height =8) #change name
-#save results
-msigdb_pathway_enrich <- pathway_enrich@compareClusterResult
-
-write.csv(msigdb_pathway_enrich, file = "Msigdb_pathway_immune-20241231.csv")
-
-
-#---------------------step 4 KEGG pathway-----------------------------
 
 ##############KEGG enrich analysis
 KEGG_enrich <- compareCluster(
@@ -220,11 +175,6 @@ p8 <- ggplot(df_KEGG, aes(x=as.factor(Cluster), y=Description)) +
 
 p8
 ggsave("Msigdb_Cluster_compare_all_1209.pdf", plot = p2, width = 8, height = 6) #change name
-
-
-
-
-
 
 #####################Peak analysis ################################################
 #####################Peak analysis ################################################
@@ -285,9 +235,6 @@ heata = Heatmap(mat ,
                     row_names_gp = gpar(fontsize = 6),
                     customRowLabel=top6$name,
                     colanno_color = c("#CB7E83","#73A1BE","#85C17E","#F5C96B","#7D9BE5","#EB8E7C","#F5C96B","#87C55F","#289E92"))
-#rowAnn = T,
-#rowAnno_num = c(10,10,10,10,10,10,10))
-
 draw(heata, merge_legends = TRUE,heatmap_legend_side = "right") 
 dev.off()
 
@@ -332,23 +279,6 @@ register(MulticoreParam(15))
 
 library(ggplot2)
 
-#pbmc <- readRDS("pbmc_rm_Doublet_celltype_ExTuImFi_1122.rds")
-
-
-############################################################################
-###Part1
-#motif ID 与motifnames一一对应的列表
-list_motif <- data.frame(immune@assays[["peaks"]]@motifs@motif.names)
-list_motif <- t(list_motif)
-list_motif <- data.frame(list_motif)
-
-#修改列名
-colnames(list_motif)[colnames(list_motif) == "list_motif"] <- "name"
-#新加一列，与行名相同
-list_motif$ID <- rownames(list_motif)
-
-########################################################################################################################
-#Part2
 DefaultAssay(immune) <- "chromvar"
 ###3 Different TF in celltype
 differential.activity <- FindAllMarkers(
@@ -381,16 +311,6 @@ gene_cell_exp <- AverageExpression(immune,
                                    group.by = 'celltype',
                                    layer = 'data',
                                    assays = 'chromvar') 
-gene_cell_exp <- as.data.frame(gene_cell_exp$chromvar)
-
-gene_cell_exp$gene = rownames(gene_cell_exp)
-
-gene_cell_exp1 <- merge(gene_cell_exp, list_motif, by.x = "gene", by.y = "ID", all.x = TRUE)
-rownames(gene_cell_exp1) = gene_cell_exp1$name
-
-gene_cell_exp1$gene <- NULL
-gene_cell_exp1$name <- NULL
-
 mat =gene_cell_exp1
 
 #label gene
@@ -398,7 +318,7 @@ top6 = differential.activity_filtered %>% group_by(cluster) %>% top_n(n = 6, wt 
 top6 = differential.activity %>% group_by(cluster) %>% top_n(n = 6, wt = avg_diff)
 
 #plot
-pdf('heatmap_TF activity76_immune-20241231.pdf', width=4, height=6)
+pdf('heatmap_TF activity76_immune.pdf', width=4, height=6)
 heata = Heatmap(mat ,
                     data_scale = F,
                     Order_col = colnames(mat),
@@ -413,9 +333,6 @@ heata = Heatmap(mat ,
                     row_names_gp = gpar(fontsize = 6),
                     customRowLabel=top6$name, #annotation
                     colanno_color = c("#66529F","#FF9900","#5084C2","#EB545C","#7D9BE5","#EB8E7C","#F5C96B","#87C55F","#289E92"))
-#rowAnn = T,
-#rowAnno_num = c(10,10,10,10,10,10,10))
-
 draw(heata, merge_legends = TRUE,heatmap_legend_side = "right") 
 dev.off()
 
