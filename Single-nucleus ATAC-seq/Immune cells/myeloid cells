@@ -58,19 +58,6 @@ p2 <- DimPlot(object = myeloid, label = TRUE, group.by = "dataset")
 p2
 ggsave("UMAP_myeloid_dataset.pdf", plot = p2, dpi = 600, bg = NULL, height = 8, width = 8)
 
-###add grade information
-grade_info <- c(
-  N1325 = "normal",
-  N584 = "Grade2",
-  T1311 = "Grade2",
-  T1325 = "Grade2",
-  T584 = "Grade3",
-  T676 = "Grade1",
-  T753 = "Grade1",
-  T873 = "Grade1",
-  T912 = "Grade1"
-)
-
 myeloid@meta.data$grade <- grade_info[myeloid@meta.data$dataset]
 
 alphabet1 <- c('#76A2BB','#F1A93B')
@@ -83,19 +70,6 @@ p4= p1+p3
 p4
 
 DefaultAssay(myeloid) <- 'RNA'
-
-marker.genes <- unique(c(
-  "ITGAM", "LGALS3", "CD68", "CD163", "ADGRE1", "LAMP2","IL1A","CCL18","CCL22","CCL24", #macrophage
-  "FLT3", "ZBTB46", "XCR1", "CLEC9A", "IRF8", "BATF3", #cDCs
-  "MPO", "FUT4", "FCGR3A", #neutrophils
-  "CD14", "FCGR3A", "TGFB1" #monocytes
-))
-
-marker.genes <- unique(c(
-  "CCL17", "CCL18", "CCL22", "CCL24",  #M2a
-  "CCL5","TGFB1","CD163","IL10", #TAM
-  "IL1B","IL1A","TNF","IL6","CD86","CD80","CXCL9","CXCL10","CXCL11","IL12A","IL12B","CCL13","SPP1"
-))
 
 #markergene of macrophage 
 marker.genes <- unique(c(
@@ -171,11 +145,6 @@ closest_genes_da_peaks1 <- DACRs_marker
 #merge da_peaks and closest_gene
 da_peaks_name <- merge(closest_genes_da_peaks1, da_peaks, by.x = "query_region", by.y = "gene", all.x = TRUE)
 
-#prepare peak accessibility ,matrix, 要把所有peak一起做归一化，zscore，
-#top peaks
-
-#prepare peak accessibility ,matrix, 要把所有peak一起做归一化，zscore，
-#top peaks
 da_peaks_filtered <-da_peaks_name[da_peaks_name$p_val < 0.001, ]
 #da_peaks_filtered <- da_peaks_name %>% group_by(cluster) %>% top_n(n = 30, wt = avg_log2FC)
 write.csv(da_peaks_filtered, file = "myeloid_da_peaks_filtered.cvs")
@@ -196,7 +165,7 @@ top6$name <- paste(top6$query_region, top6$gene_name, sep = "-")
 #write.csv(top6, file="immune_top6_peak.csv")
 #plot
 pdf('heatmap3_diff_Peak_myeloid.pdf', width=8, height=16)
-heata = dxj_Heatmap(mat ,
+heata = Heatmap(mat ,
                     data_scale = F,
                     Order_col = colnames(mat),
                     legendTitle = "z-score",
@@ -210,55 +179,9 @@ heata = dxj_Heatmap(mat ,
                     row_names_gp = gpar(fontsize = 6),
                     customRowLabel=top6$name,
                     colanno_color = c("#CB7E83","#73A1BE","#85C17E","#F5C96B","#7D9BE5","#EB8E7C","#F5C96B","#87C55F","#289E92"))
-#rowAnn = T,
-#rowAnno_num = c(10,10,10,10,10,10,10))
-
 draw(heata, merge_legends = TRUE,heatmap_legend_side = "right") 
 dev.off()
 
-# paired test
-DACRs <- FindMarkers(
-  object = immune,
-  ident.1 = "Immune cells_normal",
-  ident.2 = "Myeloid Cells",
-  test.use = 'wilcox',
-  min.pct = 0.1
-)
-DACRs$gene_name <- ClosestFeature(immune, regions = rownames(DACRs))$gene_name
-#da_peaks_filtered <-da_peaks_name[da_peaks_name$p_val_adj < 0.05, ]
-
-DACRs <- DACRs[!grepl("^KIF5C", DACRs$gene_name), ]
-DACRs <- DACRs[!grepl("^RP", DACRs$gene_name), ]
-DACRs <- DACRs[!grepl("^LINC", DACRs$gene_name), ]
-DACRs <- DACRs[!grepl("^AC0", DACRs$gene_name), ]
-DACRs <- DACRs[!grepl("^RNA", DACRs$gene_name), ]
-DACRs <- DACRs[!grepl("^AP00", DACRs$gene_name), ]
-DACRs <- DACRs[!grepl("^5S_", DACRs$gene_name), ]
-DACRs <- DACRs[!grepl("^CTD-", DACRs$gene_name), ]
-DACRs <- DACRs[!grepl("^CTC-", DACRs$gene_name), ]
-DACRs <- DACRs[!grepl("^FO538", DACRs$gene_name), ]
-DACRs <- DACRs[!grepl("^AC11", DACRs$gene_name), ]
-DACRs <- DACRs[!grepl("^CH507-", DACRs$gene_name), ]
-DACRs <- DACRs[!grepl("^ABC13-", DACRs$gene_name), ]
-DACRs <- DACRs[!grepl("^AJ27", DACRs$gene_name), ]
-DACRs <- DACRs[!grepl("^5_8S_", DACRs$gene_name), ]
-DACRs <- DACRs[!grepl("^KB-", DACRs$gene_name), ]
-
-
-p9<-EnhancedVolcano(DACRs,
-                    #lab = rownames(diff_C0),
-                    lab = DACRs$closest_gene,
-                    x = 'avg_log2FC',
-                    y = 'p_val_adj',
-                    pCutoff = 0.05,
-                    FCcutoff = 0.5,
-                    pointSize = 2.0,
-                    labSize = 6.0,
-                    title = 'Immune cells_normal vs Myeloid Cells')+
-  theme(panel.grid.major = element_blank(), 
-        panel.grid.minor = element_blank())  
-p9
-ggsave("Peak_volcano2.pdf", plot = p9, dpi = 600, bg = NULL, height = 8, width = 8)
 
 #####################motif analysis ################################################
 #####################motif analysis ################################################
@@ -272,15 +195,8 @@ library(BSgenome.Hsapiens.UCSC.hg38)
 library(patchwork)
 library(BiocParallel)
 register(MulticoreParam(15))
-
 library(ggplot2)
 
-#pbmc <- readRDS("pbmc_rm_Doublet_celltype_ExTuImFi_1122.rds")
-
-
-
-########################################################################################################################
-#Part2
 DefaultAssay(myeloid) <- "chromvar"
 ###3 Different TF in celltype
 differential.activity <- FindAllMarkers(
@@ -314,16 +230,6 @@ gene_cell_exp <- AverageExpression(myeloid,
                                    group.by = 'seurat_clusters',
                                    layer = 'data',
                                    assays = 'chromvar') 
-gene_cell_exp <- as.data.frame(gene_cell_exp$chromvar)
-
-gene_cell_exp$gene = rownames(gene_cell_exp)
-
-gene_cell_exp1 <- merge(gene_cell_exp, list_motif, by.x = "gene", by.y = "ID", all.x = TRUE)
-rownames(gene_cell_exp1) = gene_cell_exp1$name
-
-gene_cell_exp1$gene <- NULL
-gene_cell_exp1$name <- NULL
-
 mat =gene_cell_exp1
 
 #label gene
@@ -332,7 +238,7 @@ top6 = differential.activity_filtered%>% group_by(cluster) %>% top_n(n = 6, wt =
 
 #plot
 pdf('heatmap2_TF activity_myeloid.pdf', width=4, height=6)
-heata = dxj_Heatmap(mat ,
+heata = Heatmap(mat ,
                     data_scale = F,
                     Order_col = colnames(mat),
                     legendTitle = "z-score",
@@ -346,9 +252,6 @@ heata = dxj_Heatmap(mat ,
                     row_names_gp = gpar(fontsize = 6),
                     customRowLabel=top6$name, #annotation
                     colanno_color = c("#66529F","#FF9900","#5084C2","#EB545C","#7D9BE5","#EB8E7C","#F5C96B","#87C55F","#289E92"))
-#rowAnn = T,
-#rowAnno_num = c(10,10,10,10,10,10,10))
-
 draw(heata, merge_legends = TRUE,heatmap_legend_side = "right") 
 dev.off()
 
