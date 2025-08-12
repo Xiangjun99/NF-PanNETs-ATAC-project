@@ -50,34 +50,6 @@ pbmc_1285 <- readRDS("PNET1285_filtercells_celltype_250610.rds")
 pbmc_1311 <- readRDS("PNET1311_filtercells_celltype_250610.rds")
 pbmc_1325 <- readRDS("PNET1325_filtercells_celltype_250610.rds")
 
-
-pbmc_1285$dataset <- 'P1285'
-pbmc_146$dataset <- 'P146'
-pbmc_1325$dataset <- 'P1325'
-pbmc_584$dataset <- 'P584'
-pbmc_912$dataset <- 'P912'
-pbmc_873$dataset <- 'P873'
-pbmc_753$dataset <- 'P753'
-pbmc_676$dataset <- 'P676'
-pbmc_1267$dataset <- 'P1267'
-pbmc_1277$dataset <- 'P1277'
-pbmc_1224$dataset <- 'P1224'
-pbmc_1311$dataset <- 'P1311'
-
-pbmc_1285$Grade<- 'Grade1'
-pbmc_146$Grade <- 'Grade2'
-pbmc_1325$Grade <- 'Grade2'
-pbmc_584$Grade <- 'Grade3'
-pbmc_912$Grade <- 'Grade1'
-pbmc_873$Grade <- 'Grade1'
-pbmc_753$Grade <- 'Grade1'
-pbmc_676$Grade <- 'Grade1'
-pbmc_1267$Grade <- 'Grade1'
-pbmc_1277$Grade <- 'Grade2'
-pbmc_1224$Grade <- 'Grade2'
-pbmc_1311$Grade <- 'Grade2'
-
-
 combined <- merge(
   x = pbmc_1285,
   y = list(pbmc_146, pbmc_1325, pbmc_584, pbmc_912, pbmc_873, pbmc_1267, pbmc_1277, pbmc_1224, pbmc_1311,pbmc_753,pbmc_676),
@@ -106,78 +78,7 @@ ggsave("./Plots_0629/SpatialPNET_combined_DimPlot_cluster_noharmony.pdf", plot =
 ggsave("./Plots_0629/SpatialPNET_combined_DimPlot_dataset_noharmony.pdf", plot = p2, width = 6, height = 5)
 ggsave("./Plots_0629/SpatialPNET_combined_DimPlot_Grade_noharmony.pdf", plot = p3, width = 6, height = 5)
 
-p0 <- p1+p2
-p0
-
-###runharmony###################################################################################################
-###runharmony###################################################################################################
-# perform batch correction on lsi embeddings
-library(harmony)
-
-my_harmony_embeddings <- HarmonyMatrix(
-  data_mat  = as.matrix(combined@reductions$lsi@cell.embeddings),
-  meta_data = combined@meta.data,
-  vars_use  = "dataset",
-  do_pca = FALSE
-)
-rownames(my_harmony_embeddings) <- rownames(combined@reductions$lsi@cell.embeddings)
-
-#store the harmony reduction as a custom dimensional reduction called 'harmony' in the default assay
-combined[["harmony"]] <- CreateDimReducObject(embeddings = my_harmony_embeddings, key = "harmony_", assay = DefaultAssay(combined))
-combined <- FindNeighbors(object = combined, reduction = "harmony", dims = 2:25, n.trees = 100)
-combined <- FindClusters(object = combined, verbose = TRUE, algorithm = 1) # Louvain algorithm
-combined <- RunUMAP(object = combined, reduction = "harmony", dims = 2:25, resolution = 0.1)
-DimPlot(combined, reduction = 'umap', label = TRUE)
-
-
-p3 <- DimPlot(combined, reduction = 'umap', group.by = 'dataset')  
-p3
-
-p4 <- DimPlot(combined, reduction = 'umap', label = TRUE)
-p4
-#ggsave("pbmc_combined_DimPlot_harmony30_0.1_cluster.pdf", plot = p4, width = 6, height = 5)
-
-p5 <- DimPlot(combined, reduction = 'umap', group.by = 'Grade')
-p5
-
-#rename
-Idents(combined)
-combined <- RenameIdents(combined, c("6" = "4"))
-combined <- RenameIdents(combined, c("5" = "1"))
-combined <- RenameIdents(combined, c("7" = "5"))
-
-combined@active.ident <- factor(combined@active.ident, levels = c("0","1", "2", "3", "4", "5")) #,"6","7"
-
-
-library_color = c('#66529F', '#B487B7', '#DCCD58', '#DEBF80', '#F5D78F', '#CB7E83', '#5084C2',
-                  '#95BAA6', '#289E92', '#76A2BB', '#73AD96', '#5F9069', '#2B6688', '#B291B5',
-                  '#D87070', '#AABBCC', '#85C17E', '#EB545C', '#7D9BE5', '#A37E7D', 
-                  '#F5C96B', '#8A7197', '#3BA997', '#7F7F7F', '#0099FF', '#DDEEFF', '#EF7512',
-                  '#F0CE58', '#FF9900', '#FC6FCF', '#F52831', '#F1A93B',
-                  '#245297', '#DAB2B2', '#C24976', '#469393', '#DBA091')
-
-
-#c('#B487B7', '#DCCD58',  '#85C17E',  '#5084C2', '#F1A93B','#C24976','#76A2BB', 
-#                  '#73AD96', '#F5D78F', '#A37E7D',  "#AABBCC", "#FF9DA7")
-
-p3 <- DimPlot(combined, reduction = 'umap', group.by = 'dataset') + 
-  scale_color_manual(values = library_color[1:(combined$dataset %>% unique %>% length )]) # 按'Sample'分组显示
-p3
-#ggsave("pbmc_combined_DimPlot_harmony_q45_20_0.2_dataset_0617.pdf", plot = p3, width = 6, height = 5)
-
 alphabet = c("#F5C96B","#85C17E",'#DBA091',"#EB545C",'#5084C2',"#EF7512","#A084CA","#3BA997")
-alphabet <- c(
-  "#EF7521",  
-  "#B291B5",  
-  "#F5C96B",  
-  "#99C945", 
-  "#CC61B0",  
-  "#CB7E83", 
-  "#469393",  
-  "#5084C2",  
-  "#764E9F", 
-  "#EB545C"   
-)
 
 p4 <- DimPlot(combined, reduction = 'umap', label = TRUE)+ 
   scale_color_manual(values = alphabet[1:(combined@active.ident %>% unique %>% length )])
@@ -193,7 +94,6 @@ p5 <- DimPlot(combined, reduction = 'umap', group.by = 'Grade') +
   scale_color_manual(values = sample_pal[1:(combined$Grade %>% unique %>% length )]) # 按'Sample'分组显示
 p5
 
-
 ggsave("./Plots_0629/SpatialPNET_combined_DimPlot_cluster_harmony_25-1-25-0630.pdf", plot = p4, width = 6, height = 5)
 ggsave("./Plots_0629/SpatialPNET_combined_DimPlot_dataset_harmony_25-1-25-0630.pdf", plot = p3, width = 6, height = 5)
 ggsave("./Plots_0629/SpatialPNET_combined_DimPlot_Grade_harmony_25-1-25-0630.pdf", plot = p5, width = 6, height = 5)
@@ -201,57 +101,6 @@ ggsave("./Plots_0629/SpatialPNET_combined_DimPlot_Grade_harmony_25-1-25-0630.pdf
 saveRDS(combined, file="./Plots_0629/PNET_merged_12sample_V3_0629.rds")
 #save.image("PNET_Spatial_merged_workspace_12sample_V1_0629.RData")
 save(combined, file="./Plots_0629/PNET_merged_12sample_V3_0629.rdata")
-
-###cellcounts in each celltype
-table(combined@active.ident)
-cell_table <- as.data.frame(table(combined@active.ident))
-cell_table
-
-#set order
-cell_table$Var1 <- factor(cell_table$Var1, levels = c("0","1", "2", "3", "4", "5"))
-
-p6 <- ggplot(cell_table, aes(x = Freq, y = Var1, fill = Var1)) +
-  geom_bar(stat = "identity") +
-  theme_classic() +
-  labs(
-    title = "Cell Type Frequency",
-    x = "Frequency",
-    y = "Cell Type"
-  ) +
-  #scale_fill_brewer(palette = "Set3") +
-  scale_fill_manual(values = alphabet)+
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-p6
-
-ggsave("./Plots_0629/SpatialPNET_cellnumber_per_cluster_q20-0630.pdf", plot = p6, dpi = 600, bg = NULL, height = 6, width = 8)
-
-#conts in dataset
-table(combined$dataset)
-prop.table(table(Idents(combined)))
-table(Idents(combined), combined$dataset)
-
-#save
-cell_table <- as.data.frame(table(Idents(combined), combined$dataset))
-write.csv(cell_table, file = "./Plots_0629/SpatialPNET_cell_counts_in_each_sample-0630.csv", row.names = FALSE)
-
-Cellratio <- prop.table(table(Idents(combined), combined$dataset), margin = 2)
-Cellratio <- as.data.frame(Cellratio)
-
-
-library(ggplot2)
-
-Cellratio$Var1 <- factor(Cellratio$Var1, levels = c("0","1", "2", "3", "4", "5"))
-
-p7 <- ggplot(Cellratio) + 
-  geom_bar(aes(x =Var2, y= Freq, fill = Var1),stat = "identity",width = 0.7,size = 0.5,colour = '#222222')+ 
-  theme_classic() +
-  labs(x='Sample',y = 'Ratio')+
-  scale_fill_manual(values = alphabet)+
-  theme(panel.border = element_rect(fill=NA,color="black", size=0.5, linetype="solid"))
-p7
-ggsave("./Plots_0629/SpatialPNET_cellratio_per_dataset-0630.pdf", plot = p7, dpi = 600, bg = NULL, height = 6, width = 8)
-
-######################################################################################################
 
 ###heatmap###################################################################################################
 
@@ -280,13 +129,9 @@ ggsave(filename = "spatialPNET_markergene_Dotplot_celltype.pdf", plot = p6, heig
 new.cluster.ids <- c(
   "0" = "Tumor", "1" = "TME", "2" = "Lowquality"
 )
-
 combined <- RenameIdents(combined, new.cluster.ids)                        
-
 combined$celltype <- combined@active.ident
-
 combined
-
 ######################################################################################################
 #####################Peak analysis ################################################
 #####################Peak analysis ################################################
@@ -319,10 +164,7 @@ gene_cell_exp <- AverageExpression(combined,
 gene_cell_exp <- as.data.frame(gene_cell_exp$peaks)
 
 mat =gene_cell_exp
-#column_order <- c("Tumor-1", "Tumor-2", "Tumor-3", "Tumor-4", "Tumor-5", "Tumor-6", "Tumor-7", "Tumor-8", "Tumor-9")
-#mat <- mat[, column_order]
 write.csv(mat, file = "Tumor_DAP_exp_matrix_heatmap_20250121.csv")
-
 #label gene
 ###1. top marker peaks
 top6 = da_peaks_filtered %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
@@ -343,12 +185,6 @@ library(BiocParallel)
 register(MulticoreParam(15))
 
 library(ggplot2)
-
-#pbmc <- readRDS("pbmc_rm_Doublet_celltype_ExTuImFi_1122.rds")
-
-
-############################################################################
-###Part1
 
 # Get a list of motif position frequency matrices from the JASPAR database
 pfm <- getMatrixSet(
@@ -423,14 +259,6 @@ gene_cell_exp <- AverageExpression(combined,
                                    assays = 'chromvar') 
 gene_cell_exp <- as.data.frame(gene_cell_exp$chromvar)
 
-gene_cell_exp$gene = rownames(gene_cell_exp)
-
-gene_cell_exp1 <- merge(gene_cell_exp, list_motif, by.x = "gene", by.y = "ID", all.x = TRUE)
-rownames(gene_cell_exp1) = gene_cell_exp1$name
-
-gene_cell_exp1$gene <- NULL
-gene_cell_exp1$name <- NULL
-
 mat =gene_cell_exp1
 
 #label gene
@@ -451,13 +279,9 @@ genes <- c(
   "BCL2"
 )
 
-column_order <- c("Tumor-1", "Tumor-2", "Tumor-3", "Tumor-4", "Tumor-5", "Tumor-6", "Tumor-7", "Tumor-8", "Tumor-9")
-mat <- mat[, column_order]
-
-
 #plot
 pdf('heatmap2_TF activity_tumor_2025017.pdf', width=4, height=8)
-heata = dxj_Heatmap(mat ,
+heata = Heatmap(mat ,
                     data_scale = F,
                     Order_col = colnames(mat),
                     legendTitle = "z-score",
@@ -473,9 +297,6 @@ heata = dxj_Heatmap(mat ,
                     customRowLabel=genes, #annotation
                     #customRowLabel=rownames(mat), #annotation
                     colanno_color = c("#66529F","#FF9900","#5084C2","#EB545C","#7D9BE5","#EB8E7C","#F5C96B","#87C55F","#289E92"))
-#rowAnn = T,
-#rowAnno_num = c(10,10,10,10,10,10,10))
-
 draw(heata, merge_legends = TRUE,heatmap_legend_side = "right") 
 dev.off()
 
