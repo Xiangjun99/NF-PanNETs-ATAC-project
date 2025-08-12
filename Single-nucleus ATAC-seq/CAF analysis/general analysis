@@ -113,15 +113,6 @@ marker.genes <- unique(c(
   #  "CD68", "CD163"# macrophages
 ))
 
-
-marker.genes <-  unique(c(
-  #"ACTA2", "FAP", "PDGFRA", #genral CAF "PDPN", 
-  "FN1",
-  "IL6","CXCL12","PDGFRA","CFD","DPT","HAS1","PI16", #Inflammatory CAF (iCAF) markers "CXCL2","CXCL1","CCL2", 
-  "FAP","ACTA2", "THY1", "TAGLN","MMP11","MYL9","HOPX","POSTN","TPM1","TPM2", #Myofibroblastic CAF (myCAF) markers
-  "CD74", "SAA2", "SAA1","HLA-DPB1"  # Antigen-presenting CAF (apCAF) markers "HLA-DRA","HLA-DRB1",
-))
-
 marker.genes <-  unique(c(
   #"ACTA2", "FAP", "PDGFRA", #genral CAF "PDPN", 
   "FN1","CDH2","CDH1",
@@ -139,7 +130,6 @@ ggsave("fibroblast_markergene_Dotplot_20250108.pdf", plot = p6, dpi = 600, bg = 
 
 saveRDS(fibro, file="fibro.rds")
 
-# Msigdb pathway enrich analysis
 DefaultAssay(fibro) <- 'RNA'
 
 ######1.find DEGs and transfer to standard format
@@ -147,7 +137,7 @@ diff <- FindAllMarkers(fibro, assay = "RNA", logfc.threshold = 0.25, min.pct = 0
 
 #cluster information
 group <- data.frame(gene=diff$gene,
-                    group=diff$cluster)#分组情况
+                    group=diff$cluster)
 
 
 Gene_ID <- bitr(diff$gene, fromType="SYMBOL", 
@@ -155,9 +145,6 @@ Gene_ID <- bitr(diff$gene, fromType="SYMBOL",
                 OrgDb="org.Hs.eg.db")
 
 data  <- merge(Gene_ID,group,by.x='SYMBOL',by.y='gene')
-
-#
-#---------------------step 4 KEGG pathway-----------------------------
 
 ##############KEGG enrich analysis
 KEGG_enrich <- compareCluster(
@@ -198,29 +185,9 @@ da_peaks <- FindAllMarkers(fibro, assay = "peaks", logfc.threshold = 0.5, min.pc
 da_peaks$closest_gene <- ClosestFeature(fibro, regions = rownames(da_peaks))$gene_name
 
 #find closest genes near da_peaks
-open_da_peaks <- rownames(da_peaks)
 open_da_peaks
 closest_genes_da_peaks <- ClosestFeature(fibro, regions=open_da_peaks)
 head(closest_genes_da_peaks)
-
-DACRs_marker <- closest_genes_da_peaks
-DACRs_marker <- DACRs_marker[!grepl("^RP", DACRs_marker$gene_name), ]
-DACRs_marker <- DACRs_marker[!grepl("^LINC", DACRs_marker$gene_name), ]
-DACRs_marker <- DACRs_marker[!grepl("^AC0", DACRs_marker$gene_name), ]
-DACRs_marker <- DACRs_marker[!grepl("^RNA", DACRs_marker$gene_name), ]
-DACRs_marker <- DACRs_marker[!grepl("^AP00", DACRs_marker$gene_name), ]
-DACRs_marker <- DACRs_marker[!grepl("^5S_", DACRs_marker$gene_name), ]
-DACRs_marker <- DACRs_marker[!grepl("^CTD-", DACRs_marker$gene_name), ]
-DACRs_marker <- DACRs_marker[!grepl("^CTC-", DACRs_marker$gene_name), ]
-DACRs_marker <- DACRs_marker[!grepl("^FO538", DACRs_marker$gene_name), ]
-DACRs_marker <- DACRs_marker[!grepl("^AC11", DACRs_marker$gene_name), ]
-DACRs_marker <- DACRs_marker[!grepl("^CH507-", DACRs_marker$gene_name), ]
-DACRs_marker <- DACRs_marker[!grepl("^ABC13-", DACRs_marker$gene_name), ]
-DACRs_marker <- DACRs_marker[!grepl("^AJ27", DACRs_marker$gene_name), ]
-DACRs_marker <- DACRs_marker[!grepl("^5_8S_", DACRs_marker$gene_name), ]
-DACRs_marker <- DACRs_marker[!grepl("^KB-", DACRs_marker$gene_name), ]
-
-closest_genes_da_peaks1 <- DACRs_marker
 
 #merge da_peaks and closest_gene
 da_peaks_name <- merge(closest_genes_da_peaks1, da_peaks, by.x = "query_region", by.y = "gene", all.x = TRUE)
@@ -228,9 +195,6 @@ da_peaks_name <- merge(closest_genes_da_peaks1, da_peaks, by.x = "query_region",
 da_peaks_filtered <-da_peaks_name[da_peaks_name$p_val < 0.001, ]
 write.csv(da_peaks_filtered, file="fibro_da_peaks_filtered.csv")
 
-#da_peaks_filtered <- da_peaks_name %>% group_by(cluster) %>% top_n(n = 30, wt = avg_log2FC)
-
-#da_peaks_filtered=da_peaks_name
 gene_cell_exp <- AverageExpression(fibro,
                                    features = da_peaks_filtered$query_region,
                                    group.by = 'seurat_clusters',
@@ -254,7 +218,6 @@ heata = Heatmap(mat ,
                     legendTitle = "z-score",
                     point_size = 5,
                     heat_col = c('#4575b4','#abd9e9','white','#f46d43','#d73027'),
-                    #heat_col = brewer.pal(n = 5, name = "RdYlBu"),
                     TitlePosition = "leftcenter-rot",
                     legend_at = c(-8,-4,0,4,8),
                     legend_Lab = c(-8,-4,0,4,8),
@@ -262,8 +225,6 @@ heata = Heatmap(mat ,
                     row_names_gp = gpar(fontsize = 6),
                     customRowLabel=top6$name,
                     colanno_color = c("#CB7E83","#73A1BE","#85C17E","#F5C96B","#7D9BE5","#EB8E7C","#F5C96B","#87C55F","#289E92"))
-
-
 draw(heata, merge_legends = TRUE,heatmap_legend_side = "right") 
 dev.off()
 
@@ -353,7 +314,7 @@ top6 = differential.activity_filtered %>% group_by(cluster) %>% top_n(n = 6, wt 
 
 #plot
 pdf('heatmap1_TF activity_fibro.pdf', width=4, height=6)
-heata = dxj_Heatmap(mat ,
+heata = Heatmap(mat ,
                     data_scale = F,
                     Order_col = colnames(mat),
                     legendTitle = "z-score",
@@ -367,8 +328,6 @@ heata = dxj_Heatmap(mat ,
                     row_names_gp = gpar(fontsize = 6),
                     customRowLabel=top6$name, #annotation
                     colanno_color = c("#66529F","#FF9900","#5084C2","#EB545C","#7D9BE5","#EB8E7C","#F5C96B","#87C55F","#289E92"))
-
-
 draw(heata, merge_legends = TRUE,heatmap_legend_side = "right") 
 dev.off()
 
@@ -408,19 +367,9 @@ ggplot(df, aes(rank, mlog10Padj, color = mlog10Padj)) +
   xlab("Rank Sorted TFs Enriched") +
   scale_color_gradientn(colors = c("#fff5f0", "#ea8171", "#b13f64"))
 
-
-
 saveRDS(fibro, file="fibro.rds")
 
 ######coverage plot
-
-frags <- Fragments(fibro)  # get list of fragment objects
-Fragments(fibro) <- NULL  # remove fragment information from assay
-newpath <- "/vast/palmer/pi/liu_yang/dw779/@@@dixj/@PNET_project/sn_ATAC_Upstream_data/snATAC_merged_1_fragments_formal/fragments.tsv.gz"
-frags[[1]] <- UpdatePath(frags[[1]], new.path = newpath)  # update path. Do this for any/all fragment objects in the list
-Fragments(fibro) <- frags  # assign update list of fragment objects back to the assay
-
-saveRDS(fibro, file = "fibro_updatefrags_0108.rds")
 
 CoveragePlot(
   object = fibro,
@@ -438,10 +387,8 @@ genes_of_interest <-  unique(c(
   "CD74", "HLA-DPB1"  # Antigen-presenting CAF (apCAF) markers "HLA-DRA","HLA-DRB1",
 ))
 
-
 extend_upstream <- 1000
 extend_downstream <- 1000
-
 
 output_dir <- "genome_track"
 if (!dir.exists(output_dir)) {
