@@ -133,9 +133,7 @@ da_peaks_name <- merge(closest_genes_da_peaks, da_peaks, by.x = "query_region", 
 
 
 da_peaks_filtered <-da_peaks_name[da_peaks_name$p_val_adj < 0.0001, ]
-#da_peaks_filtered <- da_peaks_name %>% group_by(cluster) %>% top_n(n = 30, wt = avg_log2FC)
 
-#da_peaks_filtered=da_peaks_name
 gene_cell_exp <- AverageExpression(endocrine1,
                                    features = da_peaks_filtered$query_region,
                                    group.by = 'celltype',
@@ -185,8 +183,6 @@ register(MulticoreParam(15))
 library(ggplot2)
 
 
-########################################################################################################################
-#Part2
 DefaultAssay(endocrine1) <- "chromvar"
 ###3 Different TF in celltype
 differential.activity <- FindAllMarkers(
