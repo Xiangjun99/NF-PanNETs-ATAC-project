@@ -33,8 +33,6 @@ pbmc
 pbmc[['peaks']]
 granges(pbmc)
 
-
-
 #remove the features that correspond to chromosome scaffolds e.g. (KI270713.1) or 
 #other sequences instead of the (22+2) standard chromosomes
 peaks.keep <- seqnames(granges(pbmc)) %in% standardChromosomes(granges(pbmc))
@@ -246,7 +244,6 @@ library(Signac)
 library(Seurat)
 library(JASPAR2020)
 library(TFBSTools)
-#library(BSgenome.Mmusculus.UCSC.mm10)
 library(BSgenome.Hsapiens.UCSC.hg38)
 library(patchwork)
 
@@ -331,50 +328,30 @@ FeaturePlot(
 #Find differentially accessible peaks between cell types
 # change back to working with peaks instead of gene activities
 DefaultAssay(pbmc.filter) <- 'peaks'
-
 da_peaks <- FindAllMarkers(object = pbmc, logfc.threshold = 0.1)
-
 open_da_peaks <- rownames(da_peaks)
-
-
-
 closest_genes_da_peaks <- ClosestFeature(pbmc.filter, regions = open_da_peaks_gr)
-
 DACRs <- merge(closest_genes_da_peaks, da_peaks, by.x = "query_region", by.y = "gene")
-
 write.csv(DACRs, "DACRs_snATAC.csv")
-
-
 data <- read.csv("DACRs_snATAC.csv")
-
-
-
 top_DACR_300 <- DACRs_marker %>%
   group_by(cluster) %>%
   top_n(300, wt = avg_log2FC)
 DACRs_marker <-DACRs_marker[!duplicated(DACRs_marker[, c("gene_name", "cluster")]), ]
-
-
 write.csv(top_DACR_300, "Top_DACR_300_snATAC.csv")
-
 top_DACR <- DACRs_marker %>%
   group_by(cluster) %>%
   top_n(5, wt = avg_log2FC)
 
 top_DACR <- top_DACR[!duplicated(top_DACR[, c("gene_name", "cluster")]), ]
 
-
-
 valid_clusters <- paste0("cluster_", 0:14)
-
-
 top_DACR$cluster <- factor(top_DACR$cluster, levels = valid_clusters)
 
 top_DACR <- top_DACR %>%
   arrange(cluster, gene_name)
 
 top_DACR$gene_name <- factor(top_DACR$gene_name, levels = unique(top_DACR$gene_name))
-
 
 #Find differentially accessible peaks between cell types
 # change back to working with peaks instead of gene activities
@@ -390,9 +367,7 @@ genes <- c("CACNA1A", "KCNH2", "SYT7", "LTBP1", "PID1", "TNR", "HHAT", "FMN2", "
 
 save_path <- "./Coverage_plot/"
 
-
 for (gene in genes) {
-  
   plot <- CoveragePlot(
     object = pbmc,
     region = gene,
@@ -400,12 +375,10 @@ for (gene in genes) {
     extend.downstream = 1000
   )
   
-  
   filename <- paste0(save_path, gene, "_CoveragePlot.pdf")
   
   ggsave(filename = filename, plot = plot, device = "pdf", width = 8, height = 6)
 }
-
 #######################Motif enrichment####################
 library(Signac)
 library(Seurat)
