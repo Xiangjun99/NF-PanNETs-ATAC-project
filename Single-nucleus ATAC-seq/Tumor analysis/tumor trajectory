@@ -67,16 +67,6 @@ p2 <- pheatmap::pheatmap(
 )
 ggsave(filename = "Tumor_peak_module_trajectory_20250122.pdf", plot = p2, height = 8, width = 8)
 
-# Split modules and save each as CSV
-modules_list <- split(gene_module_df, gene_module_df$module)
-if (!dir.exists("module_list")) dir.create("module_list")
-lapply(names(modules_list), function(module_name) {
-  write.csv(
-    modules_list[[module_name]], 
-    file = file.path("module_list", paste0(module_name, "_module.csv")), 
-    row.names = FALSE
-  )
-})
 
 # --------------------- monocle3 visualization 2: Heatmap -----------------------------
 # Select significant genes
@@ -94,39 +84,10 @@ plot_matrix <- exprs(mycds2)[
 # Smooth and z-score transform
 plot_matrix <- t(apply(plot_matrix, 1, function(x) { smooth.spline(x, df = 3)$y }))
 plot_matrix <- t(apply(plot_matrix, 1, function(x) { (x - mean(x)) / sd(x) }))
-rownames(plot_matrix) <- genes
-
-# Merge columns for large datasets
-cutColumn_Means <- function(data_exp, cut) {
-  plot_matrix_combin <- list()
-  nums <- ncol(data_exp) / cut
-  if (nums - round(nums, 0) == 0) {
-    for (i in seq(1, ncol(data_exp), cut)) {
-      A <- rowMeans(data_exp[, i:(cut + i - 1)])
-      plot_matrix_combin[[length(plot_matrix_combin) + 1]] <- A
-    }
-  } else {
-    for (i in seq(1, ncol(data_exp) - cut, cut)) {
-      A <- rowMeans(data_exp[, i:(cut + i - 1)])
-      plot_matrix_combin[[length(plot_matrix_combin) + 1]] <- A
-    }
-    plot_matrix_combin[[length(plot_matrix_combin) + 1]] <- rowMeans(data_exp[, (max(seq(1, ncol(data_exp) - cut, cut)) + cut):ncol(data_exp)])
-  }
-  plot_matrix_combin <- do.call(cbind, plot_matrix_combin)
-  rownames(plot_matrix_combin) <- rownames(data_exp)
-  colnames(plot_matrix_combin) <- seq_len(ncol(plot_matrix_combin))
-  return(plot_matrix_combin)
-}
 
 plot_matrix_combin <- cutColumn_Means(plot_matrix, cut = 50)
 
 # Heatmap plotting
-callback <- function(hc, mat) {
-  sv <- svd(t(mat))$v[, 1]
-  dend <- reorder(as.dendrogram(hc), wts = sv)
-  as.hclust(dend)
-}
-
 p3 <- pheatmap::pheatmap(
   plot_matrix_combin, 
   useRaster = TRUE,
@@ -145,11 +106,5 @@ p3 <- pheatmap::pheatmap(
 
 ggsave(filename = "Tumor_peak_trajectory_heatmap_V1_20250211.pdf", plot = p3, height = 8, width = 6)
 
-# Extract module genes from heatmap clustering
-module_gene <- as.data.frame(cutree(p3$tree_row, k = 4))
-colnames(module_gene) <- "Module"
-module_gene$gene <- rownames(module_gene)
-module_gene$closest_gene <- ClosestFeature(endocrine1, regions = rownames(module_gene))$gene_name
-write.csv(module_gene, file = "module_peak_trajectory_V1_20250211.csv")
 
 
