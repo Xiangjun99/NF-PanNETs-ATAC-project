@@ -41,29 +41,6 @@ pbmc_146 <- readRDS("./PNET146/PNET146_filtercells_celltype_250610.rds")
 #######filter the cell outlier from tissue in the counts##########################################
 counts <- Read10X_h5(filename = "/vast/palmer/scratch/liu_yang/dw779/DXJ_ATAC/@@@PNET_Proj_Nov/@spatial_PNET_ATAC/GI146/CellRanger/GI146/outs/raw_peak_bc_matrix.h5")
 
-#transfer barcode to position(AXB)
-A <- data.frame(counts@Dimnames[[2]])
-A$X = A$counts.Dimnames..2..
-
-A$X <- gsub("-1$","",A$X)
-
-lookup = read.table("lookup.csv", as.is = TRUE, sep = ",")
-
-temp = lookup[match(A$X,lookup$V1),"V2"]
-
-A$name =temp
-
-#add position information to remove the cell outlier of tissue
-location <- read.table("146_position.txt", sep =",", header = FALSE, dec =".", stringsAsFactors = F)
-x <- as.character(location[1,])
-x = x[-1]
-
-A_filtered <- A[A$name %in% x,]
-A_filtered$counts.Dimnames..2..<- NULL
-#A_filtered$X <- NULL
-
-A_filtered$X <- paste0(A_filtered$X, "-1")
-
 filtered_counts <- counts[, colnames(counts) %in% A_filtered$X]
 
 ##################################################################################################
@@ -87,24 +64,18 @@ pbmc_146 <- CreateSeuratObject(
   assay = "peaks",
   meta.data = metadata
 )
-
 pbmc_146
 granges(pbmc_146)
-
 peaks.keep <- seqnames(granges(pbmc_146)) %in% standardChromosomes(granges(pbmc_146))
 pbmc_146 <- pbmc_146[as.vector(peaks.keep), ]
-
 library(AnnotationHub)
 ah <- AnnotationHub()
-
 # Search for the Ensembl 98 EnsDb for Homo sapiens on AnnotationHub
 query(ah, "EnsDb.Hsapiens.v98")
 
 ensdb_v98 <- ah[["AH75011"]]
-
 # extract gene annotations from EnsDb
 annotations <- GetGRangesFromEnsDb(ensdb = ensdb_v98)
-
 # change to UCSC style since the data was mapped to hg38
 seqlevels(annotations) <- paste0('chr', seqlevels(annotations))
 genome(annotations) <- "hg38"
@@ -124,8 +95,6 @@ pbmc_146 <- RunUMAP(object = pbmc_146, reduction = 'lsi', dims = 2:10)
 pbmc_146 <- FindNeighbors(object = pbmc_146, reduction = 'lsi', dims = 2:10)
 pbmc_146 <- FindClusters(object = pbmc_146, verbose = FALSE, algorithm = 3)
 DimPlot(object = pbmc_146, label = TRUE) + NoLegend()
-
-#alphabet = c("#5084C2","#F5C96B","#EB545C",'#DBA091','#85C17E')
 alphabet = c("Tumor1"="#5084C2",
              "Tumor2"="#F5C96B",
              "Fibroblast"="#EB545C",
@@ -153,9 +122,6 @@ df1$name =temp
 
 test <- df1 %>% separate(name, c("A", "B"),  sep = "x")
 
-
-
-#g <- rasterGrob(imported_raster, width=unit(1,"npc"), height=unit(1,"npc"), interpolate = FALSE)
 pdf(file = paste("PNET146_Spatialcluster_celltype_0625.pdf",sep =""), width=8.6, height=8.6)
 ggplot(test, aes(x = as.numeric(A), y = as.numeric(B), color=count)) + 
   scale_color_manual(values = alphabet[1:(pbmc_146@active.ident %>% unique %>% length )]) + 
@@ -186,13 +152,6 @@ ggplot(test, aes(x = as.numeric(A), y = as.numeric(B), color=count)) +
 dev.off()
 
 saveRDS(pbmc_146, file = "PNET146_filter_cells_outlier_tissue.rds")
-
-#revise the fragment path
-frags <- Fragments(pbmc_146)  # get list of fragment objects
-Fragments(pbmc_146) <- NULL  # remove fragment information from assay
-newpath <- "/vast/palmer/pi/liu_yang/dw779/@@@dixj/DXJ_ATAC/@@@PNET_Proj_Nov/@spatial_PNET_ATAC/GI146/CellRanger/GI146/outs/fragments.tsv.gz"
-frags[[1]] <- UpdatePath(frags[[1]], new.path = newpath)  # update path. Do this for any/all fragment objects in the list
-Fragments(pbmc_146) <- frags  # assign update list of fragment objects back to the assay
 
 #create a gene activity matrix
 gene.activities <- GeneActivity(pbmc_146)
@@ -231,7 +190,6 @@ ggsave(filename = "./@SpatialPNET_20250610/PNET146_markergene_Dotplot_celltype.p
 new.cluster.ids <- c(
   "0" = "Tumor1", "1" = "Fibroblast", "2" = "Tumor2", "3" = "Exocrine", "4" = "Immunecells"
 )
-
 pbmc_146 <- RenameIdents(pbmc_146, new.cluster.ids)                        
 
 pbmc_146$celltype <- pbmc_146@active.ident
@@ -239,8 +197,6 @@ pbmc_146$celltype <- pbmc_146@active.ident
 pbmc_146
 
 saveRDS(pbmc_146, file = "./@SpatialPNET_20250610/PNET146_filtercells_celltype_250610.rds")
-
-
 
 ##############Msigdb pathway analysis########################################################################################
 
@@ -469,12 +425,6 @@ register(MulticoreParam(25))
 
 library(ggplot2)
 
-#pbmc <- readRDS("pbmc_rm_Doublet_celltype_ExTuImFi_1122.rds")
-
-
-############################################################################
-###Part1
-
 # Get a list of motif position frequency matrices from the JASPAR database
 pfm <- getMatrixSet(
   x = JASPAR2020,
@@ -506,17 +456,12 @@ differential.activity <- FindAllMarkers(
   mean.fxn = rowMeans,
   fc.name = "avg_diff"
 )
-
 differential.activity
-
 differential.activity <- merge(differential.activity, list_motif, by.x = "gene", by.y = "ID", all.x = TRUE)
-
 differential.activity
-
 write.csv(differential.activity, "PNET146_diff_TF_tumor_20250625.csv")
 
 #############
-
 gene_cell_exp <- AverageExpression(pbmc_146,
                                    #features = differential.activity_filtered$gene,
                                    features = differential.activity$gene,
@@ -530,18 +475,6 @@ mat =gene_cell_exp1
 #label gene
 #top6 = differential.activity_filtered %>% group_by(cluster) %>% top_n(n = 6, wt = avg_diff)
 top6 = differential.activity %>% group_by(cluster) %>% top_n(n = 6, wt = avg_diff)
-
-genes <- unique(c(
-  "FOXI1","HNF1A","FOXA2","SOX9","TP53","HNF4A","SOX2","EBF1","INSM1","HNF4G",
-  "PRDM1","LHX2","LEF1","TCF7","POU4F1","TFAP2B","HOXB5","ASCL1",
-  "SOX14","EBF3","FOXA3","NR2F2","MEF2D","VEZF1"
-))
-
-
-column_order <- c("Tumor-1", "Tumor-2", "Tumor-3", "Tumor-4", "Tumor-5", "Tumor-6", "Tumor-7", "Tumor-8", "Tumor-9", "Tumor-10")
-mat <- mat[, column_order]
-
-
 #plot
 pdf('PNET146_heatmap1_TF activity_20250625.pdf', width=6, height=8)
 heata = Heatmap(mat ,
